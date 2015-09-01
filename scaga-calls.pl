@@ -1,4 +1,9 @@
 #!/usr/bin/perl
+
+# run like this:
+
+# for a in *.gimple; do echo "$a"; time perl ~/git/scaga/scaga-calls-async.pl < $a > /dev/null && mv calls.dump.pl $a.calls.dump.pl; done
+
 use Carp::Always;
 use IPC::Run qw/run new_chunker timeout start/;
 use File::Slurp qw/slurp/;
@@ -21,9 +26,9 @@ open $inlog, ">inlog.txt" or die;
 my $comblog;
 open $comblog, ">comblog.txt" or die;
 
-# select( ( select( $out ), $|=1 )[ 0 ] );
+select( ( select( $out ), $|=1 )[ 0 ] );
 
-# select( ( select( $comblog ), $|=1 )[ 0 ] );
+select( ( select( $comblog ), $|=1 )[ 0 ] );
 
 my $cache = { };
 
@@ -32,46 +37,109 @@ sub runcmd {
 
     chomp $cmd;
     $cmd .= "\n" if $cmd ne "";
-    
-    return $cache->{$cmd} if (defined($cache->{$cmd}));
-    
+
+    return $cache->{$cmd} if defined $cache->{$cmd};
+
     print STDERR "$cmd" if $DEBUG;
     print $outlog $cmd;
     print $comblog $cmd;
     $out .= $cmd;
 
-    until ($in =~ /\(gdb\) *$/ and $out eq "") {
-	$h->pump_nb;
-    }
+    my $ret = undef;
+    my $rret = \$ret;
 
-    my $ret = "$in";
-    print STDERR "$ret" if $DEBUG;
-    print $inlog $ret;
-    print $comblog $ret;
-    $in = "";
+    push @handlers, sub {
+        print STDERR "in: $in\n" if $DEBUG;
+        die unless $in =~ /\A(.*?)\(gdb\) *(.*)/msg;
+        my ($retval, $rest) = ($1, $2);
+        chomp $retval;
+        print $inlog "$cmd => $retval\n\n\n";
+        print STDERR "read: $retval\n" if $DEBUG;
+        $$rret = $retval;
+        $in = $rest;
+    };
+    warn scalar(@handlers) . " handlers" if $DEBUG;
     $in2 = "";
 
-    $ret =~ s/\n?\(gdb\) $//;
+    while(@handlers > 1000) {
+        pump();
+    }
 
-    return $cache->{$cmd} = $ret;
+    pump_nb();
+
+    return $cache->{$cmd} = sub { while (!defined($ret)) { pump(); }; return $ret; };
+}
+
+sub pump_nb {
+    $h->pump_nb;
+
+    while ($in =~ /\(gdb\) */ && @handlers) {
+        my $handler = shift @handlers;
+        $handler->();
+    }
+}
+
+sub pump {
+    while ($in =~ /\(gdb\) */ && @handlers) {
+        my $handler = shift @handlers;
+        $handler->();
+    }
+    $h->pump_nb;
+}
+
+sub sync {
+    while (@handlers) {
+        pump;
+        warn scalar(@handlers) . " handlers" if $DEBUG;
+    }
 }
 
 # $ofh = select STDOUT; $| = 1; select $ofh;
 
 runcmd("");
-runcmd("echo \n");
-runcmd "file emacs";
+runcmd("echo ");
+runcmd "file emacs/src/emacs";
 runcmd "start";
+runcmd "set width unlimited";
+sync;
 
 # this parses the output of gcc -fdump-tree-gimple-vops-verbose-raw-lineno
 # (.gimple)
 
+sub fstrip {
+    my ($f, $pattern) = @_;
+
+    return sub {
+        if (ref $f) {
+            return fstrip($f->(), $pattern);
+        }
+
+        my $ret = $f;
+
+        while ($ret =~ s/$pattern//msg) { }
+
+        die unless defined $ret;
+
+        return $ret;
+    };
+}
+
 sub p {
-    my $ret = runcmd ("p " . $_[0]);
+    my ($rip, $expr) = @_;
 
-    $ret =~ s/^\$[0-9]* = //;
+    die unless defined $rip;
 
-    return $ret;
+    return sub {
+        if (ref $rip) {
+            $rip = $rip->();
+
+            return p($rip, $expr);
+        }
+
+        my $fret = runcmd ("if 1\np \$rip = $rip\np $expr\nend");
+
+        return fstrip($fret, '.*\$[0-9]* = ');
+    };
 }
 
 sub register_call {
@@ -81,12 +149,11 @@ sub register_call {
 
     my $call = $calls[$#calls];
     my $rip = file_line_col_to_rip($file, $line, $col);
-    runcmd "p \$rip = $rip" if defined $rip;
 
-    my $caller_type = function_type($caller);
-    my $callee_type = function_type($callee);
-    my $caller_id = p($caller);
-    my $callee_id = p($callee);
+    my $caller_type = function_type($rip, $caller);
+    my $callee_type = function_type($rip, $callee);
+    my $caller_id = p($rip, $caller);
+    my $callee_id = p($rip, $callee);
     my $codeline;
 
     $call->[5] = $caller_type;
@@ -149,51 +216,92 @@ while (<>) {
 sub file_line_col_to_rip {
     my ($file, $line, $col) = @_;
 
-    my $ret = runcmd "info line $file:$line";
+    my $fret2 = runcmd("info line $file:$line");
 
-    if ($ret =~ s/\ALine ([0-9]*?) of \"([^\n]*?)\" (is|starts) at address ([0-9a-fx]*?) <.*\Z/$4/msg) {
-        die unless $1 eq $line;
-        die unless $2 eq $file;
-        return $ret;
-    }
+    return sub {
+        my $fret = $fret2;
+        while (ref $fret) {
+            $fret = $fret->();
+        }
+        if ($fret =~ s/Line (.*?) of \"(.*?)\"( |\t|\n)*(is|starts) at address (.*?) <.*$/$5/msg) {
+            die unless $1 eq $line;
+            die unless $2 eq $file;
+            return $fret;
+        }
 
-    return undef;
+        return "main";
+
+        die "no rip for $file:$line: $fret";
+        return undef;
+    };
 }
 
 sub function_type {
-    my ($function) = @_;
+    my ($rip, $function) = @_;
 
-    my $ret1 = runcmd "whatis \*$function";
+    if (ref $rip) {
+        $rip = $rip->();
 
-    if ($ret1 eq "") {
-        $ret1 = runcmd "whatis \&$function";
-    } else {
-        $ret1 = runcmd "whatis $function";
+        return function_type($rip, $function);
     }
 
-    if ($ret1 eq "") {
-        return undef;
-    }
+    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis \*(${function})\nend";
 
-    die $ret1 unless $ret1 =~ s/^type = //;
+    return sub {
+        my $ret1 = $fret1->();
 
-    return $ret1;
+        while (ref $ret1) {
+            $ret1 = $ret1->();
+        }
+
+        if ($ret1 =~ /type = /msg) {
+            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), ".*\\\$[0-9]\* = ");
+        } else {
+            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), ".*type = ");
+        }
+    };
 }
-
 
 sub grab_line {
     my ($file, $line, $line2) = @_;
     $line2 = $line unless defined $line2;
 
-    my $ret = runcmd "l $file:$line,$line2";
+    my $fret = runcmd "l $file:$line,$line2";
+    return sub {
+        my $ret = $fret->();
 
-    $ret =~ s/^[0-9]*[ \t]*//;
+        $ret =~ s/^[0-9]*[ \t]*//msg;
 
-    if ($ret =~ /^[({]/) {
-        $ret = grab_line($file, $line-1, $line-1) . $ret;
+        if ($ret =~ /^[({]/) {
+            my $fret2 = grab_line($file, $line-1, $line-1);
+            return sub {
+                my $ret2 = $fret2->();
+
+                return $ret . $ret2;
+            }
+        }
+
+        return $ret;
+    };
+}
+
+my $notdone = 1;
+while ($notdone) {
+    $notdone = 0;
+    for my $call (@calls) {
+        for my $i (0 .. $#$call) {
+            if (ref $call->[$i]) {
+                $call->[$i] = $call->[$i]->();
+                $notdone = 1;
+            }
+        }
     }
+    sync;
+}
 
-    return $ret;
+
+for my $call (@calls) {
+    $call->[7] => s/.*\$[0-9]*//g;
 }
 
 use Data::Dumper;
@@ -230,7 +338,7 @@ sub get_rip {
     } else {
         die if eof($fh);
         $line = <$fh>;
-        if ($line =~ s/^Line (.*?) of \"(.*?)\" (is|starts) at address (.*?) <.*$/$4/ &&
+        if ($line =~ s/^Line (.*?) of \"(.*?)\" (is|starts) at address (.*?) <.*$/$4/msg &&
             "$2:$1" eq $lineno{$lineno}) { # }$0/) {
             $type .= $line;
             last;
@@ -241,7 +349,7 @@ sub get_rip {
     chomp $type;
     $type =~ s/\(/\(\*\) \(/ unless $type =~ /\(\*\)/;
     $type =~ s/\(\*\) */\(\*\) /g;
-    
+
     return $type;
 }
 
@@ -274,8 +382,6 @@ for my $function (@functions) {
 close $fh;
 system("gdb --nx --nh --command=tmp.gdb emacs > tmp.gdbout");
 
-my $cache = undef;
-
 sub get_type {
     my ($fh) = @_;
     my $type = "";
@@ -298,7 +404,7 @@ sub get_type {
     chomp $type;
     $type =~ s/\(/\(\*\) \(/ unless $type =~ /\(\*\)/;
     $type =~ s/\(\*\) */\(\*\) /g;
-    
+
     return $type;
 }
 
@@ -308,7 +414,7 @@ for my $function (@functions) {
     ($types{$function} = get_type($fh));
 
     #print ($types{$function} . " \"calls\" $function\n");
-    
+
     $callees{$types{$function}}{$function} = $types{$function} . " > " . $function;
 }
 
