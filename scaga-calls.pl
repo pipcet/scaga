@@ -12,7 +12,7 @@ my $DEBUG = 0;
 my @cmd = ("/usr/bin/gdb");
 
 my $in;
-my $out;
+my $out = '';
 my $in2;
 
 my $h = start(\@cmd, \$out, \$in, '2>', \$in2);
@@ -40,17 +40,18 @@ sub runcmd {
 
     return $cache->{$cmd} if defined $cache->{$cmd};
 
-    print STDERR "$cmd" if $DEBUG;
+    print STDERR "cmd: $cmd" if $DEBUG;
     print $outlog $cmd;
     print $comblog $cmd;
     $out .= $cmd;
+    chomp $cmd;
 
     my $ret = undef;
     my $rret = \$ret;
 
     push @handlers, sub {
         print STDERR "in: $in\n" if $DEBUG;
-        die unless $in =~ /\A(.*?)\(gdb\) *(.*)/msg;
+        die $in unless $in =~ /\A(.*?)\n----\n\n(.*)/ms;
         my ($retval, $rest) = ($1, $2);
         chomp $retval;
         print $inlog "$cmd => $retval\n\n\n";
@@ -59,6 +60,7 @@ sub runcmd {
         $in = $rest;
     };
     warn scalar(@handlers) . " handlers" if $DEBUG;
+    warn $in2 if $in2;
     $in2 = "";
 
     while(@handlers > 1000) {
@@ -73,14 +75,14 @@ sub runcmd {
 sub pump_nb {
     $h->pump_nb;
 
-    while ($in =~ /\(gdb\) */ && @handlers) {
+    while ($in =~ /\n----\n\n/ms && @handlers) {
         my $handler = shift @handlers;
         $handler->();
     }
 }
 
 sub pump {
-    while ($in =~ /\(gdb\) */ && @handlers) {
+    while ($in =~ /\n----\n\n/ms && @handlers) {
         my $handler = shift @handlers;
         $handler->();
     }
@@ -96,9 +98,15 @@ sub sync {
 
 # $ofh = select STDOUT; $| = 1; select $ofh;
 
+pump_nb;
+sleep(1);
+$in = "";
+runcmd("\nset prompt \\n----\\n\\n\n\n\n");
 runcmd("");
-runcmd("echo ");
-runcmd "file emacs/src/emacs";
+$cache = { };
+runcmd("");
+runcmd("echo test");
+runcmd "file emacs";
 runcmd "start";
 runcmd "set width unlimited";
 sync;
@@ -254,7 +262,7 @@ sub function_type {
             $ret1 = $ret1->();
         }
 
-        if ($ret1 =~ /type = /msg) {
+        if ($ret1 =~ /type = /ms) {
             return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), ".*\\\$[0-9]\* = ");
         } else {
             return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), ".*type = ");
