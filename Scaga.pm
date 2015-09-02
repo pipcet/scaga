@@ -159,6 +159,12 @@ sub repr {
     return join(" > ", map { $_->repr } @{$self->{patterns}});
 }
 
+sub n {
+    my ($self) = @_;
+
+    return scalar(@{$self->{patterns}});
+}
+
 sub concat {
     my ($self, $other) = @_;
 
@@ -347,6 +353,30 @@ sub match {
 
 package Scaga::Rule;
 
+sub substitute {
+    my ($self, $input) = @_;
+    my @res = ();
+
+    my $m;
+    if ($m = $input->match($self->{in})) {
+        if ($self->{out}) {
+            my $output = $input->slice(0, $m->[0])
+                ->concat($self->{out})
+                ->concat($input->slice($m->[1], $path->n));
+
+            push @res, $output;
+        } else {
+            return [];
+        }
+    }
+
+    if (@res) {
+        return \@res;
+    } else {
+        return undef;
+    }
+}
+
 sub repr {
     my ($self) = @_;
 
@@ -368,8 +398,7 @@ sub new {
     if ($string =~ /^(.*) =>$/) {
         my ($in, $out) = ($1, '');
 
-        my $self = bless { in => Scaga::Path->new($in),
-                           out => Scaga::Path->new($out) }, $class;
+        my $self = bless { in => Scaga::Path->new($in) }, $class;
 
         return $self;
     }
