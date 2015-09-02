@@ -1,3 +1,6 @@
+use Carp::Always;
+use strict;
+
 package Scaga::Component;
 sub repr {
     my ($self) = @_;
@@ -12,11 +15,15 @@ sub match {
 
     if (defined($self->{codeline}) && defined($other->{pattern})) {
         my $pattern = $other->{pattern};
+        my $m = $self->{codeline} =~ /$pattern/;
 
-        return $self->{codeline} =~ /$pattern/;
+        return $m;
     }
 
-    for my $lkey (keys %{$self}) {
+    for my $lkey (keys %$self) {
+        next if $lkey eq "codeline";
+        next if $lkey eq "flc";
+
         if (defined($other->{$lkey}) and
             $other->{$lkey} ne $self->{$lkey}) {
             return 0;
@@ -121,6 +128,18 @@ sub new {
 
 package Scaga::Pattern;
 
+sub identifier {
+    my ($self) = @_;
+
+    for my $component (@{$self->{components}}) {
+        if ($component->isa('Scaga::Component::Identifier')) {
+            return $component->{identifier};
+        }
+    }
+
+    return undef;
+}
+
 sub repr {
     my ($self) = @_;
 
@@ -187,22 +206,22 @@ sub match {
 
     die unless $other->isa('Scaga::PPath');
 
-    my $ln = scalar(@{$self->{patterns}});
-    my $rn = scalar(@{$other->{patterns}});
+    my $ln = $self->n;
+    my $rn = $other->n;
 
     if ($ln == $rn) {
         my $n = $ln;
 
         for my $i (0..$n-1) {
             if (!$self->{patterns}->[$i]->match($other->{patterns}->[$i])) {
-                return 0;
+                return undef;
             }
         }
 
-        return 1;
+        return [0, $n];
     }
 
-    return 0;
+    return undef;
 }
 
 sub new {
@@ -225,8 +244,13 @@ sub repr {
 
 sub n {
     my ($self) = @_;
+    my $n = 0;
 
-    return scalar(@{$self->{ppaths}});
+    for my $ppath (@{$self->{ppaths}}) {
+        $n += $ppath->n;
+    }
+
+    return $n;
 }
 
 sub new {
@@ -262,7 +286,7 @@ sub submatch {
 
     die unless $other->isa('Scaga::Path');
 
-    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
     my $n = scalar(@{$self->{ppaths}->[0]->{patterns}});
 
@@ -284,7 +308,7 @@ sub submatch {
 sub slice {
     my ($self, $i, $j) = @_;
 
-    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
     my $ppath = $self->{ppaths}->[0]->slice($i, $j);
 
@@ -294,7 +318,7 @@ sub slice {
 sub concat {
     my ($self, $other) = @_;
 
-    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
     die "RHS must be a PPath" unless @{$other->{ppaths}} == 1;
 
     my $ppath = $self->{ppaths}->[0]->concat($other->{ppaths}->[0]);
@@ -302,16 +326,18 @@ sub concat {
     return bless { ppaths => [$ppath] }, 'Scaga::Path';
 }
 
+use Data::Dumper;
+
 sub endmatch {
     my ($self, $other) = @_;
 
     die unless $other->isa('Scaga::Path');
 
-    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
-    my $n = scalar(@{$self->{ppaths}->[0]->{patterns}});
+    my $n = $self->n;
 
-    for my $i (reverse (0 .. $n)) {
+    for my $i (reverse (0 .. $n-1)) {
         my $subpath = $self->slice($i, $n);
 
         if ($subpath->match($other)) {
@@ -327,10 +353,12 @@ sub match {
 
     die unless $other->isa('Scaga::Path');
 
-    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
     if (@{$other->{ppaths}} == 1) {
-        return $self->{ppaths}->[0]->match($other->{ppaths}->[0]);
+        my $m = $self->{ppaths}->[0]->match($other->{ppaths}->[0]);
+
+        return $m if $m;
     }
 
     if (@{$other->{ppaths}} == 2) {
@@ -342,27 +370,48 @@ sub match {
 
                 if ($lslice->match($other->{ppaths}->[0]) &&
                     $rslice->match($other->{ppaths}->[1])) {
-                    return 1;
+                    return [$i, $j];
                 }
             }
         }
     }
 
-    return 0;
+    return undef;
+}
+
+sub cycle {
+    my ($self) = @_;
+    my @patterns;
+
+    for my $ppath (@{$self->{ppaths}}) {
+        for my $pattern (@{$ppath->{patterns}}) {
+            push @patterns, $pattern;
+        }
+    }
+
+    for my $i (0 .. $#patterns) {
+        for my $j ($i+1 .. $#patterns) {
+            return [$i, $j] if $patterns[$i]->match($patterns[$j]);
+        }
+    }
+
+    return undef;
 }
 
 package Scaga::Rule;
+
+use Data::Dumper;
 
 sub substitute {
     my ($self, $input) = @_;
     my @res = ();
 
     my $m;
-    if ($m = $input->match($self->{in})) {
+    if ($m = $input->endmatch($self->{in})) {
         if ($self->{out}) {
             my $output = $input->slice(0, $m->[0])
                 ->concat($self->{out})
-                ->concat($input->slice($m->[1], $path->n));
+                ->concat($input->slice($m->[1], $input->n));
 
             push @res, $output;
         } else {
