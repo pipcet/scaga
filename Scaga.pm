@@ -5,7 +5,6 @@ sub repr {
     die;
 }
 
-
 sub match {
     my ($self, $other) = @_;
 
@@ -160,10 +159,19 @@ sub repr {
     return join(" > ", map { $_->repr } @{$self->{patterns}});
 }
 
-sub slice {
-    my ($self, $i, $k) = @_;
+sub concat {
+    my ($self, $other) = @_;
 
-    my @spatterns = @{$self->{patterns}}[$i .. $i+$k-1];
+    my @patterns = @{$self->{patterns}};
+    push @patterns, @{$other->{patterns}};
+
+    return bless { patterns => \@patterns }, 'Scaga::PPath';
+}
+
+sub slice {
+    my ($self, $i, $j) = @_;
+
+    my @spatterns = @{$self->{patterns}}[$i .. $j-1];
 
     return bless { patterns => \@spatterns }, 'Scaga::PPath';
 }
@@ -254,7 +262,7 @@ sub submatch {
 
     for my $i (0 .. $n) {
         for my $j ($i+1 .. $n) {
-            my $ppath = $self->{ppaths}->[0]->slice($i, $j - $i);
+            my $ppath = $self->{ppaths}->[0]->slice($i, $j);
 
             my $subpath = bless { ppaths => [$ppath] }, 'Scaga::Path';
 
@@ -267,7 +275,46 @@ sub submatch {
     return undef;
 }
 
-use Data::Dumper;
+sub slice {
+    my ($self, $i, $j) = @_;
+
+    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+
+    my $ppath = $self->{ppaths}->[0]->slice($i, $j);
+
+    return bless { ppaths => [$ppath] }, 'Scaga::Path';
+}
+
+sub concat {
+    my ($self, $other) = @_;
+
+    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+    die "RHS must be a PPath" unless @{$other->{ppaths}} == 1;
+
+    my $ppath = $self->{ppaths}->[0]->concat($other->{ppaths}->[0]);
+
+    return bless { ppaths => [$ppath] }, 'Scaga::Path';
+}
+
+sub endmatch {
+    my ($self, $other) = @_;
+
+    die unless $other->isa('Scaga::Path');
+
+    die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
+
+    my $n = scalar(@{$self->{ppaths}->[0]->{patterns}});
+
+    for my $i (reverse (0 .. $n)) {
+        my $subpath = $self->slice($i, $n);
+
+        if ($subpath->match($other)) {
+            return [$i, $n];
+        }
+    }
+
+    return undef;
+}
 
 sub match {
     my ($self, $other) = @_;
@@ -276,8 +323,6 @@ sub match {
 
     die "LHS must be a PPath" unless @{$self->{ppaths}} == 1;
 
-#    warn Dumper($self);
-#    warn Dumper($other);
     if (@{$other->{ppaths}} == 1) {
         return $self->{ppaths}->[0]->match($other->{ppaths}->[0]);
     }
@@ -287,7 +332,7 @@ sub match {
         for my $i (0 .. @{$self->{ppaths}->[0]->{patterns}}) {
             for my $j ($i + 1 .. $n) {
                 my $lslice = $self->{ppaths}->[0]->slice(0, $i);
-                my $rslice = $self->{ppaths}->[0]->slice($j, $n - $j);
+                my $rslice = $self->{ppaths}->[0]->slice($j, $n);
 
                 if ($lslice->match($other->{ppaths}->[0]) &&
                     $rslice->match($other->{ppaths}->[1])) {
