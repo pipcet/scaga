@@ -17,8 +17,10 @@ while (<>) {
 
     if ($path->n == 1) {
         my @ppaths = @{$path->{ppaths}};
-        my $rule = Scaga::Rule->new($ppaths[0]->{patterns}->[0]->repr . " => " . $path->repr);
-        push @expansions, $rule;
+        if ($ppaths[0]->n == 2) {
+            my $rule = Scaga::Rule->new($ppaths[0]->{patterns}->[0]->repr . " => " . $path->repr);
+            push @expansions, $rule;
+        }
     }
 
     push @paths, $path;
