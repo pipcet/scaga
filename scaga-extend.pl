@@ -5,12 +5,12 @@ use Getopt::Long;
 use File::Slurp qw(read_file write_file);
 use Data::Dumper;
 
-my $rules_file = 'rules.scaga';
-my $exps_file = 'expansions.scaga';
+my @rules_files = ();
+my @exps_files = ();
 my $do_detect_cycles = 1;
 
-GetOptions("rules=s" => \$rules_file,
-           "expansions=s" => \$exps_file,
+GetOptions("rules=s" => \@rules_files,
+           "expansions=s" => \@exps_files,
            "detect-cycles=i" => \$do_detect_cycles);
 
 sub read_expansions {
@@ -68,7 +68,10 @@ sub hash_expansions {
 }
 
 warn "reading expansions...";
-my @expansions = read_expansions($exps_file);
+my @expansions;
+for my $exps_file (@exps_files) {
+    push @expansions, read_expansions($exps_file);
+}
 my $expansions = hash_expansions(@expansions);
 
 warn "done. " . scalar(@expansions) . " expansions";
@@ -112,6 +115,7 @@ warn "done. " . scalar(@newpaths) . " paths";
 
 warn "reading rules...";
 my @rules;
+for my $rules_file (@rules_files) {
 my $fh;
 open $fh, "<$rules_file" or die;
 while (<$fh>) {
@@ -122,6 +126,7 @@ while (<$fh>) {
     push @rules, $rule;
 }
 close $fh;
+}
 warn "done. " . scalar(@rules) . " rules";
 
 sub path_expansions {
