@@ -2,6 +2,8 @@ use Carp::Always;
 use strict;
 
 package Scaga::Component;
+use Data::Dumper;
+
 sub repr {
     my ($self) = @_;
 
@@ -18,6 +20,11 @@ sub match {
         my $m = $self->{codeline} =~ /$pattern/;
 
         return $m;
+    }
+
+    if ($self->{identifier} eq "handle_async_input" and
+        $other->{identifier} eq "handle_async_input") {
+        warn Dumper($self) . Dumper($other);
     }
 
     for my $lkey (keys %$self) {
@@ -146,8 +153,15 @@ sub repr {
     return join(" = ", map { $_->repr } @{$self->{components}});
 }
 
+use Data::Dumper;
+
 sub match {
     my ($self, $other) = @_;
+
+    if ($self->identifier eq "handle_async_input" and
+        $other->identifier eq "handle_async_input") {
+        warn Dumper($self) . Dumper($other);
+    }
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
