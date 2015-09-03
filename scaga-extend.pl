@@ -6,14 +6,14 @@ use File::Slurp qw(read_file write_file);
 use Data::Dumper;
 
 my @rules_files = ();
-my @exps_files = ();
+my @calls_files = ();
 my $do_detect_cycles = 1;
 
 GetOptions("rules=s" => \@rules_files,
-           "expansions=s" => \@exps_files,
+           "calls=s" => \@calls_files,
            "detect-cycles=i" => \$do_detect_cycles);
 
-sub read_expansions {
+sub read_calls {
     my ($file) = @_;
 
     if (0 && -e "$file.pl") {
@@ -50,31 +50,31 @@ sub read_expansions {
     }
 }
 
-sub hash_expansions {
-    my (@expansions) = @_;
-    my $expansions = { "" => [] };
+sub hash_calls {
+    my (@calls) = @_;
+    my $calls = { "" => [] };
 
-    for my $expansion (@expansions) {
-        if ($expansion->{in}->n == 1) {
-            my $identifier = $expansion->{in}->{ppaths}[0]->{patterns}[0]->identifier;
+    for my $call (@calls) {
+        if ($call->{in}->n == 1) {
+            my $identifier = $call->{in}->{ppaths}[0]->{patterns}[0]->identifier;
 
-            push @{$expansions->{$identifier}}, $expansion;
+            push @{$calls->{$identifier}}, $call;
         } else {
-            push @{$expansions->{""}}, $expansion;
+            push @{$calls->{""}}, $call;
         }
     }
 
-    return $expansions;
+    return $calls;
 }
 
-warn "reading expansions...";
-my @expansions;
-for my $exps_file (@exps_files) {
-    push @expansions, read_expansions($exps_file);
+warn "reading calls...";
+my @calls;
+for my $calls_file (@calls_files) {
+    push @calls, read_calls($calls_file);
 }
-my $expansions = hash_expansions(@expansions);
+my $calls = hash_calls(@calls);
 
-warn "done. " . scalar(@expansions) . " expansions";
+warn "done. " . scalar(@calls) . " calls";
 
 warn "reading paths...";
 
@@ -95,15 +95,15 @@ warn "done. " . scalar(@paths) . " paths";
 warn "expanding paths...";
 my @newpaths = @paths;
 for my $path (@paths) {
-    my @expansions;
-    push @expansions, @{$expansions->{""}};
+    my @calls;
+    push @calls, @{$calls->{""}};
     my $identifier = $path->slice($path->n - 1, $path->n)->{ppaths}[0]->{patterns}[0]->identifier;
-    push @expansions, @{$expansions->{$identifier}} if defined $identifier and $expansions->{$identifier};
-    for my $expansion (@expansions) {
-        my $m = $path->endmatch($expansion->{in});
+    push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
+    for my $call (@calls) {
+        my $m = $path->endmatch($call->{in});
 
         if ($m) {
-            my $newpath = $path->slice(0, $m->[0])->concat($expansion->{out});
+            my $newpath = $path->slice(0, $m->[0])->concat($call->{out});
 
             push @newpaths, $newpath;
             # print $newpath->repr . "\n";

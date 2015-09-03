@@ -5,11 +5,11 @@ use Getopt::Long;
 use strict;
 
 my @rules_files = ();
-my @exps_files = ();
+my @calls_files = ();
 my $maxcycles;
 
 GetOptions("rules=s" => \@rules_files,
-           "expansions=s" => \@exps_files,
+           "calls=s" => \@calls_files,
            "max=i" => \$maxcycles);
 
 my $in = read_file(\*STDIN);
@@ -25,8 +25,8 @@ while (!(defined $maxcycles and $cycles >= $maxcycles)) {
     for my $rules_file (@rules_files) {
         push @cmd, "--rules=$rules_file";
     }
-    for my $exps_file (@exps_files) {
-        push @cmd, "--expansions=$exps_file";
+    for my $calls_file (@calls_files) {
+        push @cmd, "--calls=$calls_file";
     }
     run(\@cmd, \$in, '>', new_chunker, sub { chomp $_[0]; $seen{$_[0]} = 1; });
     $out = join("\n", sort keys %seen);
