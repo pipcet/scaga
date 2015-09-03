@@ -18,7 +18,7 @@ my $out;
 my $cycles = 0;
 
 while (!(defined $maxcycles and $cycles >= $maxcycles)) {
-    write_file("ser.iteration.$cycles", $in);
+    write_file("ser.iteration.$cycles.scaga", $in);
     $cycles++;
     my %seen;
     run(["perl", "./scaga-extend.pl", "--rules=$rules_file", "--expansions=$exps_file"], \$in, '>', new_chunker, sub { chomp $_[0]; $seen{$_[0]} = 1; });

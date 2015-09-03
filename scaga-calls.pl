@@ -296,7 +296,7 @@ sub grab_line {
     my ($file, $line, $line2) = @_;
     $line2 = $line unless defined $line2;
 
-    my $fret = runcmd "l $file:$line,$line2";
+    my $fret = runcmd "l ./$file:$line,$line2";
     return sub {
         my $ret = $fret->();
 
