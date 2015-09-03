@@ -115,16 +115,18 @@ sync;
 # (.gimple)
 
 sub fstrip {
-    my ($f, $pattern) = @_;
+    my ($f, @patterns) = @_;
 
     return sub {
         if (ref $f) {
-            return fstrip($f->(), $pattern);
+            return fstrip($f->(), @patterns);
         }
 
         my $ret = $f;
 
-        while ($ret =~ s/$pattern//msg) { }
+        for my $pattern (@patterns) {
+            while ($ret =~ s/$pattern//msg) { }
+        }
 
         die unless defined $ret;
 
@@ -253,7 +255,7 @@ sub function_type {
         return function_type($rip, $function);
     }
 
-    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis \*(${function})\nend";
+    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis (${function})0\nend";
 
     return sub {
         my $ret1 = $fret1->();
@@ -263,9 +265,9 @@ sub function_type {
         }
 
         if ($ret1 =~ /type = /ms) {
-            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), ".*\\\$[0-9]\* = ");
+            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), '.*\$[0-9]* = ');
         } else {
-            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), ".*type = ");
+            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), '.*type = ', '.*\$[0-9]*.*');
         }
     };
 }
