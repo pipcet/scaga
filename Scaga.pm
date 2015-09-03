@@ -43,11 +43,11 @@ sub match {
 sub new {
     my ($class, $string, $output) = @_;
 
-    if ($string =~ /^FLC:(.*)$/) {
+    if ($string =~ /^FLC:(.*?)$/) {
         return Scaga::Component::FLC->new($1);
-    } elsif ($string =~ /^(\/.*\/)$/) {
+    } elsif ($string =~ /^(\/[^\/]*\/)$/) {
         return Scaga::Component::RegExp->new($1);
-    } elsif ($string =~ /^\'(.*)\'$/) {
+    } elsif ($string =~ /^\'([^']*)\'$/) {
         return Scaga::Component::Codeline->new($1);
     } elsif ($string =~ /0x/) {
         return Scaga::Component::Value->new($string);
@@ -99,6 +99,8 @@ sub repr {
 
 sub new {
     my ($class, $string, $output) = @_;
+
+    $string =~ s/\'//msg;
 
     return bless { codeline => $string }, $class;
 }
