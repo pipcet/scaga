@@ -135,6 +135,21 @@ sub new {
     return bless { value => $string }, $class;
 }
 
+package Scaga::Component::Component;
+use parent -norequire, 'Scaga::Component';
+
+sub repr {
+    my ($self) = @_;
+
+    return $self->{value};
+}
+
+sub new {
+    my ($class, $string, $output) = @_;
+
+    return bless { component => $string }, $class;
+}
+
 package Scaga::Pattern;
 
 sub identifier {
@@ -178,12 +193,28 @@ sub match {
 
 sub new {
     my ($class, $string, $output) = @_;
+    my @components;
 
-    my @components = split(" = ", $string);
+    while ($string) {
+        if ($string =~ s/^FLC:(.*?:[0-9]*:[0-9]*)//ms) {
+            push @components, Scaga::Component::FLC->new($1);
+        } elsif ($string =~ s/^(component:[^ =]*)//ms) {
+            push @components, Scaga::Component::Component->new($1);
+        } elsif ($string =~ s/^(\/[^\/]*\/)//ms) {
+            push @components, Scaga::Component::RegExp->new($1);
+        } elsif ($string =~ s/^\'([^']*)\'//ms) {
+            push @components, Scaga::Component::Codeline->new($1);
+        } elsif ($string =~ s/^([^=]*0x[^=]*[^ =])//ms) {
+            push @components, Scaga::Component::Value->new($1);
+        } elsif ($string =~ s/^([^=]*[^ =])//ms) {
+            push @components, Scaga::Component::Identifier->new($1);
+        }
 
-    @components = map { Scaga::Component->new($_) } @components;
+        die unless $string eq "" or $string =~ s/^ = //ms;
+    }
 
-    return bless { components => \@components }, $class;
+    my $ret = bless { components => \@components }, $class;
+    return $ret;
 }
 
 package Scaga::PPath;

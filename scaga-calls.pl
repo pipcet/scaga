@@ -153,7 +153,7 @@ sub p {
 }
 
 sub register_call {
-    my ($caller, $callee, $file, $line, $col) = @_;
+    my ($caller, $callee, $file, $line, $col, $component) = @_;
 
     push @calls, [ $caller, $callee, $file, $line, $col ];
 
@@ -171,6 +171,7 @@ sub register_call {
     $call->[7] = $codeline = grab_line($file, $line);
     $call->[8] = $caller_id;
     $call->[9] = $callee_id;
+    $call->[10] = $component;
 
     print "$caller_type $caller = $caller_id calls $callee_type $callee = $callee_id at $file:$line: $codeline\n";
 
@@ -201,10 +202,29 @@ while (<>) {
         $type =~ s/\(\*\) */\(\*\)/msg;
         $types{$id} = $type;
     }
-    if (/^ *\[(.*?):(.*?):(.*?)] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
+    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <component_ref, ([a-zA-Z_.][a-zA-Z0-9_.]+), \[(.*?):(.*?):(.*?)\] (([a-zA-Z_.][a-zA-Z0-9_.]+)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]+))[,>]/) {
+        my ($file, $line, $col, $assignee, $file1, $line1, $col1, $expr) =
+            ($1, $2, $3, $4, $5, $6, $7, $8);
+        my ($inexpr, $comp);
+
+        if ($expr =~ /->/) {
+            $expr =~ /^(.*?)->(.*)$/;
+            ($inexpr, $comp) = ($1, $2);
+        } else {
+            $expr =~ /^(([0-9A-Za-z_]*)(\.[0-9]*)?)\.(.*)$/;
+            ($inexpr, $comp) = ($1, $2);
+        }
+
+        if (defined ($comp)) {
+            $components{$assignee} = $comp;
+        }
+    }
+    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
         my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
+        my $comp;
 
         if (($callee =~ /^_/ or $callee =~ /\./)&& $types{$callee}) {
+            $comp = $components{$callee};
             $callee = $types{$callee};
         }
 
@@ -214,7 +234,7 @@ while (<>) {
         # print $caller . " calls " . $callee . "\n";
         # $callers{$callee}{$caller} = 1;
         $callees{$caller}{$callee} = "$caller > $callee";
-        $call = register_call($caller, $callee, $file, $line, $col);
+        $call = register_call($caller, $callee, $file, $line, $col, $comp);
     }
     if (/>>\[(.*?):([0-9]*?):([0-9*])\] gimple_bind/) {
         my ($file, $line, $col) = ($1, $2, $3);

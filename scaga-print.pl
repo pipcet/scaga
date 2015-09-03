@@ -7,11 +7,13 @@ my $calls;
 eval("\$calls = " . read_file($ARGV[0]));
 
 for my $call (@$calls) {
-    my ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id) = @$call;
+    my ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id, $component) = @$call;
 
     $codeline =~ s/\'//g;
 
-    print "$caller = FLC:$file:$line:$col = \'$codeline\' = $caller_id > $callee = $callee_id\n";
+    $component = defined($component) ? " = component:$component" : "";
+
+    print "$caller = FLC:$file:$line:$col = \'$codeline\' = $caller_id > $callee = $callee_id$component\n";
     print "$caller_type > $caller\n";
     print "$callee_type > $callee\n";
 }
