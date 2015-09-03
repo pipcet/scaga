@@ -1,0 +1,6 @@
+commands:
+
+for a in *.c; do echo $a; time perl ~/git/scaga/scaga-calls.pl < "$a.004t.gimple" > /dev/null 2>/dev/null && mv calls.dump.pl "$a.pl"; done
+for a in *.c.pl; do perl ~/git/scaga/scaga-print.pl "$a" | (cd ~/git/scaga; perl ~/git/scaga/scaga-strip.pl) | grep component':'; done
+for a in *.c.pl; do perl ~/git/scaga/scaga-print.pl "$a"; done | sort | uniq > emacs-calls.scaga
+echo "process_pending_signals" | perl ./scaga-extend-recursively.pl --expansions=emacs-calls.scaga --rules=rules.scaga
