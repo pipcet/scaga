@@ -10,6 +10,10 @@ for my $call (@$calls) {
     my ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id, $component) = @$call;
 
     $codeline =~ s/\'//g;
+    $codeline =~ s/ > />/g;
+    $codeline =~ s/ >> />>/g;
+    $codeline =~ s/ = /=/g;
+    $codeline =~ s/\n/ /msg;
 
     $component = defined($component) ? " = component:$component" : "";
 

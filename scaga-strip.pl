@@ -8,12 +8,14 @@ my $strip_identifier = 0;
 my $strip_codeline = 1;
 my $strip_flc = 1;
 my $strip_value = 1;
+my $strip_component = 0;
 my $do_strip_cycles = 1;
 
 GetOptions("strip_identifier=i" => \$strip_identifier,
            "strip_codeline=i" => \$strip_codeline,
            "strip_flc=i" => \$strip_codeline,
            "strip_value=i" => \$strip_value,
+           "strip_component=i" => \$strip_component,
            "strip_cycles=i" => \$do_strip_cycles);
 
 while (<>) {
@@ -32,6 +34,7 @@ while (<>) {
                 push @comps, $component if $component->isa('Scaga::Component::Codeline') && !$strip_codeline;
                 push @comps, $component if $component->isa('Scaga::Component::Identifier') && !$strip_identifier;
                 push @comps, $component if $component->isa('Scaga::Component::Value') && !$strip_value;
+                push @comps, $component if $component->isa('Scaga::Component::Component') && !$strip_component;
             }
             $pattern->{components} = \@comps;
         }

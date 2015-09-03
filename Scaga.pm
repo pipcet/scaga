@@ -141,7 +141,7 @@ use parent -norequire, 'Scaga::Component';
 sub repr {
     my ($self) = @_;
 
-    return $self->{value};
+    return $self->{component};
 }
 
 sub new {
@@ -202,15 +202,17 @@ sub new {
             push @components, Scaga::Component::Component->new($1);
         } elsif ($string =~ s/^(\/[^\/]*\/)//ms) {
             push @components, Scaga::Component::RegExp->new($1);
-        } elsif ($string =~ s/^\'([^']*)\'//ms) {
+        } elsif ($string =~ s/^'([^']*)'//ms) {
             push @components, Scaga::Component::Codeline->new($1);
+        } elsif ($string =~ /^'/) {
+            die $string;
         } elsif ($string =~ s/^([^=]*0x[^=]*[^ =])//ms) {
             push @components, Scaga::Component::Value->new($1);
         } elsif ($string =~ s/^([^=]*[^ =])//ms) {
             push @components, Scaga::Component::Identifier->new($1);
         }
 
-        die unless $string eq "" or $string =~ s/^ = //ms;
+        die $string unless $string eq "" or $string =~ s/^ = //ms;
     }
 
     my $ret = bless { components => \@components }, $class;
