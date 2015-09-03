@@ -22,11 +22,6 @@ sub match {
         return $m;
     }
 
-    if ($self->{identifier} eq "handle_async_input" and
-        $other->{identifier} eq "handle_async_input") {
-        warn Dumper($self) . Dumper($other);
-    }
-
     for my $lkey (keys %$self) {
         next if $lkey eq "codeline";
         next if $lkey eq "flc";
@@ -174,11 +169,6 @@ use Data::Dumper;
 
 sub match {
     my ($self, $other) = @_;
-
-    if ($self->identifier eq "handle_async_input" and
-        $other->identifier eq "handle_async_input") {
-        warn Dumper($self) . Dumper($other);
-    }
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
