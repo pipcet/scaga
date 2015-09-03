@@ -120,6 +120,8 @@ my $fh;
 open $fh, "<$rules_file" or die;
 while (<$fh>) {
     chomp;
+    s/#.*$//;
+    next if $_ eq "";
 
     my $rule = Scaga::Rule->new($_);
 
