@@ -4,6 +4,10 @@ use strict;
 package Scaga::Component;
 use Data::Dumper;
 
+sub identifiers {
+    return ();
+}
+
 sub repr {
     my ($self) = @_;
 
@@ -12,6 +16,10 @@ sub repr {
 
 sub match {
     my ($self, $other) = @_;
+
+    if (defined($self->{pattern}) and defined($other->{pattern})) {
+        return $self->{pattern} eq $other->{pattern};
+    }
 
     die if (defined($self->{pattern}));
 
@@ -70,6 +78,12 @@ sub new {
 
 package Scaga::Component::Identifier;
 use parent -norequire, 'Scaga::Component';
+
+sub identifiers {
+    my ($self) = @_;
+
+    return ($self->{identifier});
+}
 
 sub repr {
     my ($self) = @_;
@@ -162,6 +176,28 @@ sub new {
 
 package Scaga::Pattern;
 
+# internal. modifies data.
+sub normalize {
+    my ($self) = @_;
+
+#    die $self->repr unless $self->match($self);
+
+    my $components = $self->{components};
+
+  loop:
+    while (1) {
+        for my $i (0 .. $#$components) {
+            for my $j ($i + 1 .. $#$components) {
+                if (ref($components->[$i]) eq ref($components->[$j])) {
+                    splice @$components, $j, 1;
+                    next loop;
+                }
+            }
+        }
+        last;
+    }
+}
+
 sub identifier {
     my ($self) = @_;
 
@@ -180,10 +216,23 @@ sub repr {
     return join(" = ", map { $_->repr } @{$self->{components}});
 }
 
+sub identifiers {
+    my ($self) = @_;
+    my @ret;
+
+    for my $ppath (@{$self->{components}}) {
+        push @ret, $ppath->identifiers;
+    }
+
+    return @ret;
+}
+
 use Data::Dumper;
 
 sub match {
     my ($self, $other) = @_;
+
+    die $self->repr unless @{$self->{components}} and @{$other->{components}};
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
@@ -194,6 +243,22 @@ sub match {
     }
 
     return 1;
+}
+
+sub merge {
+    my ($self, $other) = @_;
+
+    die ($self->repr . " doesn't match " . $other->repr) unless $self->match($other);
+
+    my @components;
+    push @components, @{$self->{components}};
+    push @components, @{$other->{components}};
+
+    my $ret = bless { components => \@components }, 'Scaga::Pattern';
+
+    $ret->normalize;
+
+    return $ret;
 }
 
 sub new {
@@ -223,6 +288,9 @@ sub new {
     }
 
     my $ret = bless { components => \@components }, $class;
+
+    $ret->normalize;
+
     return $ret;
 }
 
@@ -234,10 +302,36 @@ sub repr {
     return join(" > ", map { $_->repr } @{$self->{patterns}});
 }
 
+sub identifiers {
+    my ($self) = @_;
+    my @ret;
+
+    for my $ppath (@{$self->{patterns}}) {
+        push @ret, $ppath->identifiers;
+    }
+
+    return @ret;
+}
+
 sub n {
     my ($self) = @_;
 
     return scalar(@{$self->{patterns}});
+}
+
+sub concat_overlapping {
+    my ($self, $other, $overlap) = @_;
+
+    my @patterns = @{$self->{patterns}};
+    my $n0 = scalar @patterns;
+    push @patterns, @{$other->{patterns}};
+
+    splice @patterns, $n0 - 1, 2, $patterns[$n0-1]->merge($patterns[$n0]);
+
+    return bless { patterns => \@patterns }, 'Scaga::PPath';
+    my $ppath = $self->{ppaths}->[0]->concat_overlapping($other->{ppaths}->[0], $overlap);
+
+    return bless { ppaths => [$ppath] }, 'Scaga::Path';
 }
 
 sub concat {
@@ -251,6 +345,13 @@ sub concat {
 
 sub slice {
     my ($self, $i, $j) = @_;
+
+    if (!defined($i) or $i < 0) {
+        $i = 0;
+    }
+    if (!defined($j) or $j > $self->n) {
+        $j = $self->n;
+    }
 
     my @spatterns = @{$self->{patterns}}[$i .. $j-1];
 
@@ -292,10 +393,54 @@ sub new {
 
 package Scaga::Path;
 
+%Scaga::Path::paths = ();
+
+sub intern {
+    my ($self) = @_;
+
+    return $self if $self->{interned};
+
+    my $repr = $self->repr;
+    return $Scaga::Path::paths{$repr} if $Scaga::Path::paths{$repr};
+
+    $self->{interned} = 1;
+    $Scaga::Path::paths{$repr} = $self;
+
+    return $self;
+}
+
 sub repr {
     my ($self) = @_;
 
-    return join(" >> ", map { $_->repr } @{$self->{ppaths}});
+    return $self->{repr} if (defined $self->{repr});
+
+    return $self->{repr} = join(" >> ", map { $_->repr } @{$self->{ppaths}});
+}
+
+sub identifiers {
+    my ($self) = @_;
+
+    if (defined($self->{identifiers})) {
+        return @{$self->{identifiers}};
+    }
+
+    my @ret;
+
+    for my $ppath (@{$self->{ppaths}}) {
+        push @ret, $ppath->identifiers;
+    }
+
+    $self->{identifiers} = \@ret;
+
+    return @ret;
+}
+
+sub last_identifier {
+    my ($self) = @_;
+
+    my @identifiers = $self->identifiers;
+
+    return $identifiers[$#identifiers];
 }
 
 sub n {
@@ -367,6 +512,17 @@ sub slice {
     die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
     my $ppath = $self->{ppaths}->[0]->slice($i, $j);
+
+    return bless { ppaths => [$ppath] }, 'Scaga::Path';
+}
+
+sub concat_overlapping {
+    my ($self, $other, $overlap) = @_;
+
+    die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
+    die "RHS must be a PPath" unless @{$other->{ppaths}} == 1;
+
+    my $ppath = $self->{ppaths}->[0]->concat_overlapping($other->{ppaths}->[0], $overlap);
 
     return bless { ppaths => [$ppath] }, 'Scaga::Path';
 }
@@ -454,7 +610,19 @@ sub cycle {
     return undef;
 }
 
+sub cmp {
+    my ($self, $other) = @_;
+
+    return 1024 * ($self->n <=> $other->n) || ($self->repr cmp $other->repr);
+}
+
 package Scaga::Rule;
+
+sub identifiers {
+    my ($self) = @_;
+
+    return $self->{in}->identifiers;
+}
 
 use Data::Dumper;
 
@@ -500,7 +668,7 @@ sub new {
         return $self;
     }
 
-    if ($string =~ /^(.*) =>$/) {
+    if ($string =~ /^(.*?)( =>)?$/) {
         my ($in, $out) = ($1, '');
 
         my $self = bless { in => Scaga::Path->new($in) }, $class;
@@ -513,4 +681,11 @@ sub new {
 }
 
 package Scaga;
+
+sub cmppath {
+    my ($self, $other) = @_;
+
+    return $self->cmp($other);
+}
+
 1;
