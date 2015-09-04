@@ -4,13 +4,19 @@ use Scaga;
 use Getopt::Long;
 use File::Slurp qw(read_file write_file);
 use Data::Dumper;
+use List::Util qw(shuffle);
 
 my @rules_files = ();
 my @calls_files = ();
 my $do_detect_cycles = 1;
+my $last = 1;
+my $loop_rules = 1;
+my $verbose = 1;
 
-GetOptions("rules=s" => \@rules_files,
+GetOptions("last=i" => \$last,
+           "rules=s" => \@rules_files,
            "calls=s" => \@calls_files,
+           "loop-rules=i" => \$loop_rules,
            "detect-cycles=i" => \$do_detect_cycles);
 
 sub read_calls {
@@ -67,6 +73,25 @@ sub hash_calls {
     return $calls;
 }
 
+sub hash_rules {
+    my (@rules) = @_;
+    my $rules = { "" => [] };
+
+    for my $rule (@rules) {
+        my @identifiers = $rule->identifiers;
+
+        if (@identifiers) {
+            for my $identifier (@identifiers) {
+                push @{$rules->{$identifier}}, $rule;
+            }
+        } else {
+            push @{$rules->{""}}, $rule;
+        }
+    }
+
+    return $rules;
+}
+
 warn "reading calls...";
 my @calls;
 for my $calls_file (@calls_files) {
@@ -92,50 +117,23 @@ while (<>) {
 
 warn "done. " . scalar(@paths) . " paths";
 
-warn "expanding paths...";
-my @newpaths = @paths;
-for my $path (@paths) {
-    my @calls;
-    push @calls, @{$calls->{""}};
-    my $identifier = $path->slice($path->n - 1, $path->n)->{ppaths}[0]->{patterns}[0]->identifier;
-    push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
-    for my $call (@calls) {
-        my $m = $path->endmatch($call->{in});
-
-        if ($m) {
-            my $newpath = $path->slice(0, $m->[0])->concat($call->{out});
-
-            push @newpaths, $newpath;
-            # print $newpath->repr . "\n";
-        }
-    }
-}
-
-warn "done. " . scalar(@newpaths) . " paths";
-
-warn "reading rules...";
-my @rules;
-for my $rules_file (@rules_files) {
-my $fh;
-open $fh, "<$rules_file" or die;
-while (<$fh>) {
-    chomp;
-    s/#.*$//;
-    next if $_ eq "";
-
-    my $rule = Scaga::Rule->new($_);
-
-    push @rules, $rule;
-}
-close $fh;
-}
-warn "done. " . scalar(@rules) . " rules";
-
 sub path_expansions {
     my ($path, $rules) = @_;
     my @res;
 
-    for my $rule (@$rules) {
+    my @identifiers = ($path->last_identifier);
+
+    if (!@identifiers) {
+        @identifiers = ("");
+    }
+
+    my @rules;
+
+    for my $identifier (@identifiers) {
+        push @rules, @{$rules->{$identifier}} if $rules->{$identifier};
+    }
+
+    for my $rule (@rules) {
         my $s = $rule->substitute($path);
 
         if ($s) {
@@ -160,31 +158,144 @@ sub path_expansions {
     }
 }
 
-warn "applying rules...";
-my $notdone = 1;
-while ($notdone) {
-    $notdone = 0;
+ rules_loop:
+while ($loop_rules--) {
 
-    my @outpaths;
+    warn "reading rules..." if $verbose;
+    my @rules;
+    for my $rules_file (@rules_files) {
+        my $fh;
+        open $fh, "<$rules_file" or die;
+        while (<$fh>) {
+            chomp;
+            s/#.*$//;
+            next if $_ eq "";
 
-    for my $path (@newpaths) {
-        next unless defined $path;
-        next if $path->cycle;
+            my $rule = Scaga::Rule->new($_);
 
-        my $res = path_expansions($path, \@rules);
-
-        if ($res) {
-            $notdone = 1 if @$res > 1;
-            push @outpaths, @$res;
-        } else {
-            push @outpaths, $path;
+            push @rules, $rule;
         }
+        close $fh;
+    }
+    my $rules = hash_rules(@rules);
+    warn "done. " . scalar(@rules) . " rules" if $verbose;
+
+    my %done;
+    my %done2;
+    my %paths;
+    for my $path (@paths) {
+        $paths{$path->repr} = $path;
+    }
+    my $iteration = 0;
+    my $notreallydone = 1;
+    while($notreallydone) {
+        $notreallydone = 0;
+
+        warn "expanding paths..." if $verbose;
+        my %newpaths = %paths;
+        for my $path (values %paths) {
+            if ($done{$path->repr}) {
+                next;
+            }
+            my @calls;
+            push @calls, @{$calls->{""}};
+            my $identifier = $path->slice($path->n - 1, $path->n)->{ppaths}[0]->{patterns}[0]->identifier;
+            push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
+            for my $call (@calls) {
+                my $m = $path->endmatch($call->{in});
+                my $n = $call->{in}->n;
+
+                if ($m) {
+                    my $newpath;
+
+                    if (0 && $path->slice($m->[0], $m->[0]+1)->match($call->{out}->slice(0, 1))) {
+                        # XXX actually merge the matching pattern.
+                        $newpath = $path->slice(0, $m->[0]+1)->concat($call->{out}->slice(1, undef));
+                    } else {
+                        $newpath = $path->slice(0, $m->[0]+$n)->concat_overlapping($call->{out}, $n)->intern;
+                    }
+
+                    next if $newpath->cycle or !defined($newpath);
+
+                    $newpaths{$newpath->repr} = $newpath;
+                    # print $newpath->repr . "\n";
+                }
+            }
+            $done{$path->repr} = 1;
+        }
+
+        warn "done. " . scalar(keys %newpaths) . " paths" if $verbose;
+
+
+        warn "applying rules..." if $verbose;
+        my $notdone = 1;
+        while ($notdone) {
+            $notdone = 0;
+
+            my %outpaths;
+
+            for my $path (values %newpaths) {
+                if ($done2{$path->repr}) {
+                    for my $outpath (@{$done2{$path->repr}}) {
+                        $outpaths{$outpath->repr} = $outpath;
+                    }
+                    next;
+                }
+                next unless defined $path;
+                if ($path->cycle) {
+                    next;
+                }
+
+                my @outpaths;
+                my $res = path_expansions($path, $rules);
+
+                if ($res) {
+                    $notdone = 1 if @$res > 1;
+                    for my $outpath (@$res) {
+                        next if $outpath->cycle;
+                        push @outpaths, $outpath;
+                    }
+                } else {
+                    push @outpaths, $path;
+                }
+                $done2{$path->repr} = \@outpaths;
+                for my $outpath (@outpaths) {
+                    $outpaths{$outpath->repr} = $outpath;
+                }
+            }
+
+            %newpaths = %outpaths;
+        }
+        warn "done. " . scalar(keys %newpaths) . " paths." if $verbose;
+
+        $notreallydone ||= (scalar(keys %paths) != scalar(keys %newpaths));
+
+        %paths = ();
+
+        warn "shortening paths ..." if $verbose;
+        for my $path (shuffle values %newpaths) {
+            my $spath = $path->slice($path->n - $last, $path->n);
+            my $repr = $spath->repr;
+            if (!$paths{$repr} or Scaga::cmppath($path, $paths{$repr}) < -2) {
+                $paths{$repr} = $path;
+            }
+        }
+        warn "done. " . scalar(keys %paths) . " paths." if $verbose;
+
+        my $fh;
+        open $fh, ">se-iteration-$iteration.scaga";
+        for my $path (values %paths) {
+            print $fh $path->repr . "\n";
+            if ($path->last_identifier eq "Ffuncall") {
+                warn $path->repr;
+                next rules_loop if rand() < .3;
+            }
+        }
+        close $fh;
+        $iteration++;
     }
 
-    @newpaths = @outpaths;
-}
-warn "done. " . scalar(@newpaths) . " paths.";
-
-for my $path (@newpaths) {
-    print $path->repr . "\n";
+    for my $path (values %paths) {
+        print $path->repr . "\n";
+    }
 }
