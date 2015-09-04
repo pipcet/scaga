@@ -130,6 +130,21 @@ sub new {
     return bless { value => $string }, $class;
 }
 
+package Scaga::Component::Intype;
+use parent -norequire, 'Scaga::Component';
+
+sub repr {
+    my ($self) = @_;
+
+    return $self->{intype};
+}
+
+sub new {
+    my ($class, $string, $output) = @_;
+
+    return bless { intype => $string }, $class;
+}
+
 package Scaga::Component::Component;
 use parent -norequire, 'Scaga::Component';
 
@@ -190,6 +205,8 @@ sub new {
             push @components, Scaga::Component::FLC->new($1);
         } elsif ($string =~ s/^(component:[^ =]*)//ms) {
             push @components, Scaga::Component::Component->new($1);
+        } elsif ($string =~ s/^(intype:[^=]*[^ =])//ms) {
+            push @components, Scaga::Component::Intype->new($1);
         } elsif ($string =~ s/^(\/[^\/]*\/)//ms) {
             push @components, Scaga::Component::RegExp->new($1);
         } elsif ($string =~ s/^'([^']*)'//ms) {

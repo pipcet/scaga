@@ -152,8 +152,11 @@ sub p {
     };
 }
 
+my $pwd;
+chomp($pwd = `/bin/pwd`);
+
 sub register_call {
-    my ($caller, $callee, $file, $line, $col, $component) = @_;
+    my ($caller, $callee, $file, $line, $col, $component, $inexpr) = @_;
 
     push @calls, [ $caller, $callee, $file, $line, $col ];
 
@@ -172,8 +175,9 @@ sub register_call {
     $call->[8] = $caller_id;
     $call->[9] = $callee_id;
     $call->[10] = $component;
+    $call->[11] = data_type($rip, $inexpr) if $inexpr ne "";
 
-    print "$caller_type $caller = $caller_id calls $callee_type $callee = $callee_id at $file:$line: $codeline\n";
+#    print "$caller_type $caller = $caller_id calls $callee_type $callee = $callee_id at $file:$line: $codeline\n";
 
     return $calls[$#calls];
 }
@@ -189,7 +193,8 @@ while (<>) {
         $caller = $1;
         $functions{$caller} = $1;
     }
-    if (/^ *(.*?) ([a-zA-Z_.][a-zA-Z0-9_.]+);$/) {
+    if (/^ *(.*?) ([a-zA-Z_.][a-zA-Z0-9_.]*);$/ or
+        />>>, (.*?) ([a-zA-Z_.][a-zA-Z0-9_.]*)$/) {
         my $id = $2;
         my $type = $1;
 
@@ -202,29 +207,29 @@ while (<>) {
         $type =~ s/\(\*\) */\(\*\)/msg;
         $types{$id} = $type;
     }
-    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <component_ref, ([a-zA-Z_.][a-zA-Z0-9_.]+), \[(.*?):(.*?):(.*?)\] (([a-zA-Z_.][a-zA-Z0-9_.]+)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]+))[,>]/) {
-        my ($file, $line, $col, $assignee, $file1, $line1, $col1, $expr) =
-            ($1, $2, $3, $4, $5, $6, $7, $8);
+    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <component_ref, ([a-zA-Z_.][a-zA-Z0-9_.]*), (\[(.*?):(.*?):(.*?)\] )*(\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*))[,>]/) {
+        my ($file, $line, $col, $assignee, $linespec, $file1, $line1, $col1, $expr) =
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9);
         my ($inexpr, $comp);
 
         if ($expr =~ /->/) {
             $expr =~ /^(.*?)->(.*)$/;
             ($inexpr, $comp) = ($1, $2);
         } else {
-            $expr =~ /^(([0-9A-Za-z_]*)(\.[0-9]*)?)\.(.*)$/;
+            $expr =~ /^(.*)\.([^.]*)$/;
             ($inexpr, $comp) = ($1, $2);
         }
 
         if (defined ($comp)) {
-            $components{$assignee} = $comp;
+            $components{$assignee} = [$comp, $inexpr];
         }
     }
     if (/^ *\[(.*?):(.*?):(.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
         my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
-        my $comp;
+        my ($comp, $inexpr);
 
         if (($callee =~ /^_/ or $callee =~ /\./)&& $types{$callee}) {
-            $comp = $components{$callee};
+            ($comp, $inexpr) = @{$components{$callee}};
             $callee = $types{$callee};
         }
 
@@ -234,7 +239,7 @@ while (<>) {
         # print $caller . " calls " . $callee . "\n";
         # $callers{$callee}{$caller} = 1;
         $callees{$caller}{$callee} = "$caller > $callee";
-        $call = register_call($caller, $callee, $file, $line, $col, $comp);
+        $call = register_call($caller, $callee, $file, $line, $col, $comp, $inexpr);
     }
     if (/>>\[(.*?):([0-9]*?):([0-9*])\] gimple_bind/) {
         my ($file, $line, $col) = ($1, $2, $3);
@@ -292,11 +297,25 @@ sub function_type {
     };
 }
 
+sub data_type {
+    my ($rip, $function) = @_;
+
+    if (ref $rip) {
+        $rip = $rip->();
+
+        return data_type($rip, $function);
+    }
+
+    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis ${function}\nend";
+
+    return fstrip($fret1, '.*type = ');
+}
+
 sub grab_line {
     my ($file, $line, $line2) = @_;
     $line2 = $line unless defined $line2;
 
-    my $fret = runcmd "l ./$file:$line,$line2";
+    my $fret = runcmd "l ${pwd}/${file}:${line},${line2}";
     return sub {
         my $ret = $fret->();
 
