@@ -9,6 +9,7 @@ my $strip_codeline = 1;
 my $strip_flc = 1;
 my $strip_value = 1;
 my $strip_component = 0;
+my $strip_intype = 0;
 my $do_strip_cycles = 1;
 
 GetOptions("strip_identifier=i" => \$strip_identifier,
@@ -16,6 +17,7 @@ GetOptions("strip_identifier=i" => \$strip_identifier,
            "strip_flc=i" => \$strip_codeline,
            "strip_value=i" => \$strip_value,
            "strip_component=i" => \$strip_component,
+           "strip_intype=i" => \$strip_intype,
            "strip_cycles=i" => \$do_strip_cycles);
 
 while (<>) {
