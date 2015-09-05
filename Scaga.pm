@@ -632,6 +632,7 @@ sub substitute {
 
     my $m;
     if ($m = $input->endmatch($self->{in})) {
+        $self->{usecount}++;
         if ($self->{out}) {
             my $output = $input->slice(0, $m->[0])
                 ->concat($self->{out})
@@ -653,7 +654,11 @@ sub substitute {
 sub repr {
     my ($self) = @_;
 
-    return $self->{in}->repr . " => " . $self->{out}->repr;
+    if ($self->{out}) {
+        return $self->{in}->repr . " => " . $self->{out}->repr;
+    } else {
+        return $self->{in}->repr;
+    }
 }
 
 sub new {
@@ -663,7 +668,8 @@ sub new {
         my ($in, $out) = ($1, $2);
 
         my $self = bless { in => Scaga::Path->new($in),
-                           out => Scaga::Path->new($out) }, $class;
+                           out => Scaga::Path->new($out),
+                           usecount => 0, }, $class;
 
         return $self;
     }
@@ -671,7 +677,7 @@ sub new {
     if ($string =~ /^(.*?)( =>)?$/) {
         my ($in, $out) = ($1, '');
 
-        my $self = bless { in => Scaga::Path->new($in) }, $class;
+        my $self = bless { in => Scaga::Path->new($in), usecount => 0 }, $class;
 
         return $self;
     }
