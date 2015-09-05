@@ -49,9 +49,12 @@ for my $call (@$calls) {
     $component = defined($component) ? " = component:$component" : "";
     $intype = (defined($intype) and $intype ne "") ? " = intype:$intype" : "";
 
-    next if $caller eq $callee; # XXX distinguish actual recursive
+    next if ($caller eq $callee) and !defined($component); # XXX distinguish actual recursive
                                 # calls from type-only fake calls.
 
+    if (defined($component) and $caller eq $callee) {
+        print "$caller_type$component > $caller\n"
+    }
     print "$caller = FLC:$file:$line:$col = \'$codeline\' = $caller_id > $callee = $callee_id$component$intype\n";
     print "$caller_type > $caller\n" unless $caller_type eq $caller or $caller_type eq "" or $caller eq "";
     print "$callee_type > $callee\n" unless $callee_type eq $callee or $callee_type eq "" or $callee eq "";

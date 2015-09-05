@@ -188,6 +188,12 @@ sub register_function {
     return register_call ($function, $function, $file, $line, $col);
 }
 
+sub register_suggested_type {
+    my ($function, $file, $line, $col, $component) = @_;
+
+    return register_call ($function, $function, $file, $line, $col, $component);
+}
+
 while (<>) {
     if (/^([a-zA-Z_].*?) \(/) {
         $caller = $1;
@@ -223,6 +229,12 @@ while (<>) {
         if (defined ($comp)) {
             $components{$assignee} = [$comp, $inexpr];
         }
+    }
+    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <addr_expr, (\[.*?:.*?:.*?\] )*\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*), (\[.*?:.*?:.*?\] )*([a-zA-Z_.][a-zA-Z0-9_.]*)[,>]/) {
+        my ($file, $line, $col, $dummy1, $expr, $op, $component, $dummy2, $value) =
+            ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+
+        register_suggested_type($value, $file, $line, $col, $component);
     }
     if (/^ *\[(.*?):(.*?):(.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
         my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
