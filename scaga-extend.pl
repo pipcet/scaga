@@ -9,7 +9,7 @@ use List::Util qw(shuffle);
 my @rules_files = ();
 my @calls_files = ();
 my $do_detect_cycles = 1;
-my $last = 1;
+my $last = 4;
 my $loop_rules = 1;
 my $verbose = 1;
 
@@ -179,6 +179,7 @@ while ($loop_rules--) {
     }
     my $rules = hash_rules(@rules);
     warn "done. " . scalar(@rules) . " rules" if $verbose;
+    my %usecount;
 
     my %done;
     my %done2;
@@ -280,7 +281,18 @@ while ($loop_rules--) {
                 $paths{$repr} = $path;
             }
         }
-        warn "done. " . scalar(keys %paths) . " paths." if $verbose;
+        warn "done. " . scalar(keys %paths) . " paths, iteration " . $iteration . "." if $verbose;
+
+        for my $rule (@rules) {
+            $usecount{$rule->repr} += $rule->{usecount};
+        }
+
+        my $fh;
+        open $fh, ">rules-iteration-$iteration.scaga";
+        for my $rule (sort { $usecount{$b} <=> $usecount{$a} } map { $_->repr } @rules) {
+            print $fh ($usecount{$rule} . ": " . $rule . "\n");
+        }
+        close $fh;
 
         my $fh;
         open $fh, ">se-iteration-$iteration.scaga";
