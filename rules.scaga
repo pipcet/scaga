@@ -1,0 +1,314 @@
+# x-lost-selection-functions
+x_clear_frame_selections = /Qx_lost_selection_functions/ > Frun_hook_with_args
+# file name directory handler xxx
+Ffile_name_directory = FLC:fileio.c:314:19
+# internal_condition_case_1 with constant first argument:
+x_clipboard_manager_save_frame = /x_clipboard_manager_save/ > internal_condition_case_1 > Lisp_Object (*)(Lisp_Object) => x_clipboard_manager_save
+# noreturn
+Fkill_emacs
+terminate_due_to_signal
+emacs_abort
+error
+memory_full
+wrong_type_argument
+shut_down_emacs
+signal_error
+xsignal
+# not a noreturn, investigate this
+x_io_error_quitter
+x_delete_display
+# impossible due to function arguments
+gobble_input = /noelisp/ > Fdelete_terminal > safe_call2
+delete_terminal = /Qnoelisp/ > delete_frame > safe_call2
+# handle_interrupt if (!NILP (Vquit_flag))
+handle_interrupt > reset_all_sys_modes
+handle_interrupt > sys_suspend
+handle_interrupt > Fdo_auto_save
+handle_interrupt > init_all_sys_modes
+# handle_interrupt if immediate_quit
+handle_interrupt > Fsignal
+# actually block this entire function
+handle_interrupt
+# only if Vquit_flag
+process_quit_flag
+# check Qtooltip
+/Qtooltip/ > Fframe_parameter > Fframe_parameters > tty_color_name
+/Qtooltip/ > Fframe_parameter > frame_unspecified_color
+/Qfullscreen/ > Fframe_parameter > Fframe_parameters > tty_color_name
+/Qfullscreen/ > Fframe_parameter > frame_unspecified_color
+/Qfullscreen/ > Fframe_parameter > Fframe_parameters > frame_unspecified_color
+# uses t->delete_terminal_hook instead
+Fdelete_terminal > delete_terminal
+# XXX simulate a call when register_unwind_protect is called
+unbind_to
+# Lisp machinery that's almost never used (I hope)
+store_symval_forwarding > call1
+# I think this call path doesn't happen... maybe it does.
+tb_size_cb = /f, -1, -1, 5, 0, Qtool_bar_lines/ > adjust_frame_size > call2
+tb_size_cb = /f, -1, -1, 5, 0, Qtool_bar_lines/ > adjust_frame_size > frame_windows_min_size
+tb_size_cb = /f, -1, -1, 5, 0, Qtool_bar_lines/ > adjust_frame_size > resize_frame_windows
+tb_size_cb = /f, -1, -1, 5, 0, Qtool_bar_lines/ > adjust_frame_size > run_window_configuration_change_hook
+tb_size_cb = /f, -1, -1, 5, 0, Qtool_bar_lines/ > adjust_frame_size > sanitize_window_sizes
+xg_frame_set_char_size = /f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > call2
+xg_frame_set_char_size = /f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > frame_windows_min_size
+xg_frame_set_char_size = /f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > resize_frame_windows
+xg_frame_set_char_size = /f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > run_window_configuration_change_hook
+xg_frame_set_char_size = /f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > sanitize_window_sizes
+/f, new_width, new_height, 5, pretend,/ > adjust_frame_size > call2
+/f, new_width, new_height, 5, pretend,/ > adjust_frame_size > frame_windows_min_size
+/f, new_width, new_height, 5, pretend,/ > adjust_frame_size > resize_frame_windows
+/f, new_width, new_height, 5, pretend,/ > adjust_frame_size > run_window_configuration_change_hook
+/f, new_width, new_height, 5, pretend,/ > adjust_frame_size > sanitize_window_sizes
+menubar_map_cb
+Lisp_Object (*)(Lisp_Object, Lisp_Object) = component:validator => font_prop_validate_symbol
+Lisp_Object (*)(Lisp_Object, Lisp_Object) = component:validator => font_prop_validate_style
+Lisp_Object (*)(Lisp_Object, Lisp_Object) = component:validator => font_prop_validate_non_neg
+Lisp_Object (*)(Lisp_Object, Lisp_Object) = component:validator => font_prop_validate_spacing
+Lisp_Object (*)(Lisp_Object, Lisp_Object) = component:validator => font_prop_validate_otf
+# XXX
+void (*)(Lisp_Object) = component:free_entity
+# # example of a regexp pattern
+# /show_hourglass/ > void (*)(struct frame *) => x_show_hourglass
+# /toggle_invisible_pointer_hook/ > void (*)(struct frame *, _Bool) => XTtoggle_invisible_pointer
+void (*)(struct frame *, _Bool) = component:toggle_visible_pointer => x_toggle_visible_pointer
+void (*)(struct frame *, _Bool) = component:toggle_visible_pointer => xfixes_toggle_visible_pointer
+void (*)(struct terminal *) = component:delete_terminal_hook => x_delete_terminal
+int (*)(struct terminal *, struct input_event *) = component:read_socket_hook => XTread_socket
+void (*)(struct frame *) = component:frame_up_to_date_hook => XTframe_up_to_date
+void (*)(struct frame *) = component:fullscreen_hook => XTfullscreen_hook
+void (*)(struct frame *) = component:delete_frame_hook => x_destroy_window
+void (*)(struct frame *) = component:judge_scroll_bars_hook => XTjudge_scroll_bars
+void (*)(struct frame *) = component:condemn_scroll_bars_hook => XTcondemn_scroll_bars
+void (*)(struct coding_system *) = component:decoder => decode_coding_raw_text
+void (*)(struct coding_system *) = component:decoder => decode_coding_iso_2022
+void (*)(struct coding_system *) = component:decoder => decode_coding_charset
+void (*)(struct coding_system *) = component:decoder => decode_coding_utf_8
+void (*)(struct coding_system *) = component:decoder => decode_coding_utf_16
+void (*)(struct coding_system *) = component:decoder => decode_coding_ccl
+void (*)(struct coding_system *) = component:decoder => decode_coding_emacs_mule
+void (*)(struct coding_system *) = component:decoder => decode_coding_sjis
+void (*)(struct coding_system *) = component:decoder => decode_coding_big5
+void (*)(struct coding_system *) = component:decoder => decode_coding_raw_text
+# NULL
+void (*)(Lisp_Object) = component:free_entity = intype:struct font_driver *
+# # error conditions that might call Lisp
+# emacs_abort
+# terminate_due_to_signal
+# shut_down_emacs
+# x_io_error_quitter
+# unbind_to
+# delete_terminal
+# Fsymbol_value = /void_variable/ > xsignal1
+# wrong_type_argument
+# Fdelete_terminal > error
+# image_error
+# # debug conditions
+# Fsignal > maybe_call_debugger
+# signal-hook-function
+Fsignal = /Vsignal_hook_function/ > call2
+Fsignal > Ferror_message_string
+# quit_throw_to_read_char
+# # this is a potential path to Lisp, but if that's broken the user's wrong
+# # hashfn_user_defined
+# # Qvendor_specific_keysyms
+# x_term_init > call1
+# # verify this
+# store_frame_param > swap_in_global_binding > store_symval_forwarding
+# create_terminal > find_symbol_value > swap_in_symval_forwarding > store_symval_forwarding
+# # _probably_ okay
+# get_keymap > Fload
+# # in fatal error code
+# select_visual = FLC:xfns.c:4653:2 > code_convert_string_norecord
+# # verify these
+# tb_size_cb > adjust_frame_size
+# menubar_map_cb > adjust_frame_size
+# xg_frame_set_char_size > adjust_frame_size
+# tb_size_cb > adjust_frame_size > run_window_configuration_change_hook
+# menubar_map_cb > adjust_frame_size > run_window_configuration_change_hook
+# # this only happens when Vquit_flag is set
+# handle_interrupt > Fdo_auto_save
+# # functions implemented in Lisp that shouldn't call hooks
+# FLC:window.c:2811:10 > call5
+# FLC:window.c:2827:10 > call2
+# FLC:window.c:2834:10 > call2
+# FLC:frame.c:331:10 > call4
+# FLC:frame.c:541:5 > call2
+# FLC:frame.c:557:5 > call2
+# FLC:frame.c:585:3 > call2
+# FLC:dispnew.c:5507:7 > adjust_frame_size > run_window_configuration_change_hook
+# init_all_sys_modes
+# # list concat doesn't set text properties
+# Fframe_parameters > Fcopy_alist > concat > add_text_properties_from_list
+# # for now
+# Fload
+# FLC:xsmfns.c:409:7 = x_session_initialize > emacs_strerror > code_convert_string_norecord
+# emacs_strerror > code_convert_string_norecord
+purecopy
+# set_internal > store_symval_forwarding
+# Fset_default > store_symval_forwarding
+# store_symval_forwarding
+# load_charset
+# # should have been called
+x_term_init
+# messages-buffer-mode should be safe
+message_dolog > call0
+# buffer-list-update-hook? "*Messages*" should exist.
+message_dolog > Fget_buffer_create > call1
+# "*Messages*" should not have a region extract function
+message_dolog > insert_1_both > prepare_to_modify_buffer > prepare_to_modify_buffer_1 > call1
+# "*Messages*" should not be locked
+message_dolog > insert_1_both > prepare_to_modify_buffer > prepare_to_modify_buffer_1 > lock_file
+# other things: text properties, at least.x
+message_dolog > insert_1_both
+# mouse highlight maps should be loaded.
+note_mode_line_or_margin_highlight > get_keymap > Fautoload_do_load
+# charsets for the X string should be loaded
+decode_coding_charset > decode_char > load_charset
+decode_char > load_charset
+# decode_coding_c_string doesn't call buffer hooks
+/decode_coding_c_string/ > decode_coding_object > del_range_both > prepare_to_modify_buffer
+/decode_coding_c_string/ > decode_coding_object > del_range_both > signal_after_change
+/decode_coding_c_string/ > decode_coding_object > del_range_both > update_compositions
+/decode_coding_c_string/ > decode_coding_object > del_range_both > del_range_2
+/decode_coding_c_string/ > decode_coding_object > Fbuffer_string
+/decode_coding_c_string/ > decode_coding_object > decode_coding > decode_eol > del_range_2
+decode_coding_object = FLC:coding.c:8094:7 > code_conversion_save > make_conversion_work_buffer
+decode_coding_object = FLC:coding.c:8103:7 > code_conversion_save > make_conversion_work_buffer
+# x-keysym-table must use a builtin hash function
+handle_one_xevent > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+handle_one_xevent > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+# the "cpu_log" hash uses its own hash functions
+record_backtrace > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined => cmpfn_profiler
+record_backtrace > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined => hashfn_profiler
+record_backtrace > evict_lower_half > Fremhash > hash_remove_from_table > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined => cmpfn_profiler
+record_backtrace > evict_lower_half > Fremhash > hash_remove_from_table > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined => hashfn_profiler
+# coding_system must use a builtin hash function
+setup_coding_system > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+setup_coding_system > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+adjust_coding_eol_type > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+adjust_coding_eol_type > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+Fcoding_system_p > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+Fcoding_system_p > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+ccl_driver > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+ccl_driver > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+maybe_unify_char > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+maybe_unify_char > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+face_for_char > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+face_for_char > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+get_window_cursor_type > Fassoc > Fequal > internal_equal > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+get_window_cursor_type > Fassoc > Fequal > internal_equal > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+buffer_local_value > Fassoc > Fequal > internal_equal > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+buffer_local_value > Fassoc > Fequal > internal_equal > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+font_registry_charsets > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+font_registry_charsets > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+font_registry_charsets > find_font_encoding > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+font_registry_charsets > find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+code_convert_string > find_font_encoding > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+code_convert_string > find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+code_convert_string > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+code_convert_string > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+fontset_from_font > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+fontset_from_font > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+Fset_fontset_font > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+Fset_fontset_font > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+ftfont_lookup_cache > Fputhash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+ftfont_lookup_cache > Fputhash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+# # CODING_ATTR_POST_READ ()
+decode_coding_object > safe_call1
+# # CHECK_CODING_SYSTEM_GET_ID ()
+Fcheck_coding_system > safe_eval
+# # we're probably not using character signals for gs
+Fkill_process > process_send_signal > send_process
+Fkill_process > process_send_signal > redisplay_preserve_echo_area
+# # can't be bothered finding all those call chains.
+# face_at_string_position > merge_face_ref > add_to_log
+# # tty-color-alist
+# /Qtty_color_alist/ > call1
+x_property_data_to_lisp > selection_data_to_lisp_data > Fput_text_property > Fadd_text_properties > add_text_properties_1 > modify_text_properties > prepare_to_modify_buffer_1
+selection_data_to_lisp_data > Fput_text_property > Fadd_text_properties > add_text_properties_1 > signal_after_change
+# # face height function
+merge_face_heights > safe_call1
+# Ffind_file_name_handler ()...
+Fexpand_file_name > call3
+# tty-color-standard-values
+tty_defined_color > tty_lookup_color > call1
+# tty-color-desc
+tty_defined_color > tty_lookup_color > call2
+# # messages-buffer-mode
+# message_dolog > call0
+# # cancel-timer
+# Fx_hide_tip > call1
+# #region-extract-function XXX
+# prepare_to_modify_buffer_1 > call1
+# # frame-set-background-mode
+# update_face_from_frame_parameter > call1
+# map_charset_chars > void (*)(Lisp_Object, Lisp_Object)
+# # frame-set-background-mode
+Fmodify_frame_parameters > update_face_from_frame_parameter
+code_convert_string > encode_coding_object > Fkill_buffer
+code_convert_string > encode_coding_object > del_range_1 > prepare_to_modify_buffer
+code_convert_string > encode_coding_object > del_range_1 > del_range_2 > make_buffer_string_both
+code_convert_string > encode_coding_object > insert_1_both > prepare_to_modify_buffer
+code_convert_string > encode_coding_object > Fbuffer_string
+code_convert_string > encode_coding_object > insert_from_buffer
+code_convert_string > encode_coding_object > insert_from_string > insert_from_string_1 > prepare_to_modify_buffer
+code_convert_string > encode_coding_object > insert_from_string > update_compositions
+code_convert_string > encode_coding_object > insert_from_string_1 > prepare_to_modify_buffer
+code_convert_string > encode_coding_object > insert_from_string > insert_from_string_1 > prepare_to_modify_buffercode_convert_string > encode_coding_object > insert_from_string > signal_after_change
+insert_from_string > signal_after_change
+code_convert_string > encode_coding_object > insert_1_both > set_text_properties > signal_after_change
+/set_identity/ > map_char_table > call2
+/set_canon/ > map_char_table > call2
+/shuffle/ > map_char_table > call2
+# # XXX
+# map_charset_chars
+# tty_menu_show
+# emulate_dialog_with_menu
+# map_char_table
+signal_after_change
+encode_coding_object
+# # CODING_ATTR_PRE_WRITE (attrs)
+encode_coding_object > safe_call2
+# # x-gtk-map-stock
+# x_change_tool_bar_height > update_frame_tool_bar
+Fset_fontset_font > Fmodify_frame_parameters > x_set_frame_parameters > x_set_offset
+Fset_fontset_font > Fmodify_frame_parameters > x_set_frame_parameters > Fset_frame_size
+Fset_fontset_font > Fmodify_frame_parameters > x_set_frame_parameters > void (*)(struct frame *, Lisp_Object, Lisp_Object) => x_set_font
+# # doesn't happen: predicate isn't a function
+FLC:image.c:322:7 > openp = /predicate/ > call1
+/Vcharset_map_path/ > openp = /predicate/ > call1
+# not taken
+Fprin1_to_string > set_point_both
+# constant first argument to internal_condition_case_
+exec_sentinel = /read_process_output_call/ > internal_condition_case_1 > Lisp_Object (*)(Lisp_Object) => read_process_output_call
+# tty-color-alist. safe?
+/assoc_no_quit \(color, call1 \(Qtty_color_alist/ = map_tty_color > call1
+# sigh.
+x_kill_gs_process > Fkill_process
+x_kill_gs_process > image_error
+# handler should be safe.
+Fdirectory_file_name > call2
+Ffile_directory_p > call2
+Ffile_readable_p > call2
+add_to_log
+x_kill_gs_process
+map_charset_chars > call2
+map_charset_chars > void (*)(Lisp_Object, Lisp_Object)
+map_charset_for_dump > call2
+map_charset_for_dump > void (*)(Lisp_Object, Lisp_Object)
+map_charset_for_dump > apropos_accum > call1
+map_sub_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object)
+map_sub_char_table > call2
+map_sub_char_table_for_charset > call2
+map_sub_char_table_for_charset > void (*)(Lisp_Object, Lisp_Object)
+map_sub_char_table_for_charset > mapatoms_1 > call1
+map_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object)
+map_char_table > call2
+map_char_table_for_charset > call2
+map_char_table_for_charset > void (*)(Lisp_Object, Lisp_Object)
+run_composition_function > call2
+code_convert_string > encode_coding_object > del_range_1 > signal_after_change
+Fsignal > maybe_call_debugger
+# XXX
+x_set_font > x_new_font > adjust_frame_size
+Fexpand_file_name > egetenv > egetenv_internal > getenv_internal > Fframe_parameter
