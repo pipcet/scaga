@@ -4,3 +4,5 @@ for a in *.c; do echo $a; time perl ~/git/scaga/scaga-calls.pl < "$a.004t.gimple
 for a in *.c.pl; do perl ~/git/scaga/scaga-print.pl "$a" | (cd ~/git/scaga; perl ~/git/scaga/scaga-strip.pl) | grep component':'; done
 for a in *.c.pl; do perl ~/git/scaga/scaga-print.pl "$a"; done | sort | uniq > emacs-calls.scaga
 echo "process_pending_signals" | perl ./scaga-extend-recursively.pl --calls=emacs-calls.scaga --calls=emacs-glib-callbacks.scaga --rules=rules.scaga
+for a in /home/pip/git/emacs/src/*.c.pl; do perl ~/git/scaga/scaga-print.pl "$a"; done | sort | uniq > emacs-calls.scaga
+while sleep 1; do for a in /home/pip/git/emacs/src/*.c.pl; do perl ~/git/scaga/scaga-print.pl "$a"; done | sort | uniq > emacs-calls.scaga.new && mv emacs-calls.scaga.new emacs-calls.scaga; echo "process_pending_signals" | perl ./scaga-extend.pl --loop-rules=-1 --calls=emacs-calls.scaga --calls=emacs-glib-callbacks.scaga --rules=rules.scaga > out.scaga && wc -l out.scaga; done
