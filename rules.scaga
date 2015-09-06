@@ -5,15 +5,38 @@ Ffile_name_directory = FLC:fileio.c:314:19
 # internal_condition_case_1 with constant first argument:
 x_clipboard_manager_save_frame = /x_clipboard_manager_save/ > internal_condition_case_1 > Lisp_Object (*)(Lisp_Object) => x_clipboard_manager_save
 # noreturn
+Fabort_recursive_edit
+Fexit_recursive_edit
 Fkill_emacs
-terminate_due_to_signal
+Fthrow
+Ftop_level
+args_out_of_range
+args_out_of_range_3
+buffer_memory_full
+buffer_overflow
+die
 emacs_abort
 error
+fatal
 memory_full
-wrong_type_argument
+nsberror
+pure_write_error
+report_file_errno
+report_file_error
 shut_down_emacs
 signal_error
+string_overflow
+terminate_due_to_signal
+time_overflow
+verror
+wrong_choice
+wrong_range
+wrong_type_argument
 xsignal
+xsignal0
+xsignal1
+xsignal2
+xsignal3
 # not a noreturn, investigate this
 x_io_error_quitter
 x_delete_display
@@ -113,7 +136,7 @@ Fsignal > Ferror_message_string
 # # Qvendor_specific_keysyms
 # x_term_init > call1
 # # verify this
-# store_frame_param > swap_in_global_binding > store_symval_forwarding
+store_frame_param > swap_in_global_binding > store_symval_forwarding
 # create_terminal > find_symbol_value > swap_in_symval_forwarding > store_symval_forwarding
 # # _probably_ okay
 # get_keymap > Fload
@@ -138,7 +161,8 @@ Fsignal > Ferror_message_string
 # FLC:dispnew.c:5507:7 > adjust_frame_size > run_window_configuration_change_hook
 # init_all_sys_modes
 # # list concat doesn't set text properties
-# Fframe_parameters > Fcopy_alist > concat > add_text_properties_from_list
+Fframe_parameters > Fcopy_alist > concat > add_text_properties_from_list
+get_translation_table > Fcopy_sequence > concat > add_text_properties_from_list
 # # for now
 # Fload
 # FLC:xsmfns.c:409:7 = x_session_initialize > emacs_strerror > code_convert_string_norecord
@@ -171,6 +195,9 @@ decode_char > load_charset
 /decode_coding_c_string/ > decode_coding_object > del_range_both > update_compositions
 /decode_coding_c_string/ > decode_coding_object > del_range_both > del_range_2
 /decode_coding_c_string/ > decode_coding_object > Fbuffer_string
+/decode_coding_c_string/ > decode_coding_object > set_buffer_internal
+/decode_coding_c_string/ > decode_coding_object > decode_coding > produce_chars > insert_from_gap > graft_intervals_into_buffer
+/decode_coding_c_string/ > decode_coding_object > decode_coding > produce_chars > insert_from_gap > offset_intervals
 /decode_coding_c_string/ > decode_coding_object > decode_coding > decode_eol > del_range_2
 decode_coding_object = FLC:coding.c:8094:7 > code_conversion_save > make_conversion_work_buffer
 decode_coding_object = FLC:coding.c:8103:7 > code_conversion_save > make_conversion_work_buffer
@@ -195,6 +222,8 @@ maybe_unify_char > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object
 maybe_unify_char > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 face_for_char > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 face_for_char > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+face_for_char > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+face_for_char > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 get_window_cursor_type > Fassoc > Fequal > internal_equal > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 get_window_cursor_type > Fassoc > Fequal > internal_equal > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 buffer_local_value > Fassoc > Fequal > internal_equal > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
@@ -207,12 +236,28 @@ code_convert_string > find_font_encoding > hash_lookup > _Bool (*)(struct hash_t
 code_convert_string > find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 code_convert_string > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 code_convert_string > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+code_convert_string_norecord > find_font_encoding > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+code_convert_string_norecord > find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+code_convert_string_norecord > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+code_convert_string_norecord > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 fontset_from_font > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 fontset_from_font > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+fontset_from_font > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+fontset_from_font > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+fontset_from_font > find_font_encoding > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+fontset_from_font > find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+find_font_encoding > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+find_font_encoding > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 Fset_fontset_font > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 Fset_fontset_font > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+Fset_fontset_font > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+Fset_fontset_font > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+ftfont_lookup_cache > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+ftfont_lookup_cache > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 ftfont_lookup_cache > Fputhash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
 ftfont_lookup_cache > Fputhash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
+font_registry_charsets > Fgethash > hash_lookup > _Bool (*)(struct hash_table_test *, Lisp_Object, Lisp_Object) > cmpfn_user_defined
+font_registry_charsets > Fgethash > hash_lookup > EMACS_UINT (*)(struct hash_table_test *, Lisp_Object) > hashfn_user_defined
 # # CODING_ATTR_POST_READ ()
 decode_coding_object > safe_call1
 # # CHECK_CODING_SYSTEM_GET_ID ()
@@ -277,6 +322,7 @@ Fset_fontset_font > Fmodify_frame_parameters > x_set_frame_parameters > void (*)
 # # doesn't happen: predicate isn't a function
 FLC:image.c:322:7 > openp = /predicate/ > call1
 /Vcharset_map_path/ > openp = /predicate/ > call1
+/Vcharset_map_path/ > openp > encode_file_name
 # not taken
 Fprin1_to_string > set_point_both
 # constant first argument to internal_condition_case_
@@ -311,4 +357,30 @@ code_convert_string > encode_coding_object > del_range_1 > signal_after_change
 Fsignal > maybe_call_debugger
 # XXX
 x_set_font > x_new_font > adjust_frame_size
+x_set_font > x_new_font > fontset_from_font
 Fexpand_file_name > egetenv > egetenv_internal > getenv_internal > Fframe_parameter
+# x-resource-name should not have text properties
+validate_x_resource_name > Fcopy_sequence > concat > add_text_properties_from_list
+resolve_symbol_ccl_program > Fcopy_sequence > concat > add_text_properties_from_list
+font_style_to_value > Fvconcat > concat > add_text_properties_from_list
+font_list_entities > Fvconcat > concat > add_text_properties_from_list
+font_add_log > Fcopy_sequence > concat > add_text_properties_from_list
+font_add_log > concat3 > concat > add_text_properties_from_list
+font_add_log > concat2 > concat > add_text_properties_from_list
+Fset_fontset_font > concat3 > concat > add_text_properties_from_list
+Fset_fontset_font > concat2 > concat > add_text_properties_from_list
+fontset_get_font_group > Fcopy_sequence > concat > add_text_properties_from_list
+font_parse_xlfd > concat3 > concat > add_text_properties_from_list
+font_parse_xlfd > concat2 > concat > add_text_properties_from_list
+font_vconcat_entity_vectors > Fvconcat > concat > add_text_properties_from_list
+font_delete_unmatched > Fvconcat > concat > add_text_properties_from_list
+Fupcase > casify_object > Fcopy_sequence > concat > add_text_properties_from_list
+Fdowncase > casify_object > Fcopy_sequence > concat > add_text_properties_from_list
+load_charset
+load_pixmap
+Fset_fontset_font > free_realized_fontsets > Fclear_face_cache
+compile_pattern_1 > Fcopy_sequence > concat > add_text_properties_from_list
+produce_charset > Fput_text_property > Fadd_text_properties
+compose_text > Fput_text_property > Fadd_text_properties
+hashfn_user_defined
+cmpfn_user_defined
