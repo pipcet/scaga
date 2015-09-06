@@ -8,6 +8,7 @@ use List::Util qw(shuffle);
 
 my @rules_files = ();
 my @calls_files = ();
+my @badrules_files = ();
 my $do_detect_cycles = 1;
 my $last = 4;
 my $loop_rules = 1;
@@ -15,6 +16,7 @@ my $verbose = 1;
 
 GetOptions("last=i" => \$last,
            "rules=s" => \@rules_files,
+           "badrules=s" => \@badrules_files,
            "calls=s" => \@calls_files,
            "loop-rules=i" => \$loop_rules,
            "detect-cycles=i" => \$do_detect_cycles);
@@ -158,10 +160,8 @@ sub path_expansions {
     }
 }
 
- rules_loop:
-while ($loop_rules--) {
-
-    warn "reading rules..." if $verbose;
+sub read_rules {
+    my @rules_files = @_;
     my @rules;
     for my $rules_file (@rules_files) {
         my $fh;
@@ -179,69 +179,78 @@ while ($loop_rules--) {
     }
     my $rules = hash_rules(@rules);
     warn "done. " . scalar(@rules) . " rules" if $verbose;
+
+    return $rules;
+}
+
+ rules_loop:
+while ($loop_rules--) {
+    warn "reading rules..." if $verbose;
     my %usecount;
 
-    my %done;
-    my %done2;
-    my %paths;
+    my $oldpaths;
+    my $paths;
     for my $path (@paths) {
-        $paths{$path->repr} = $path;
+        $paths->{$path->repr} = $path;
     }
     my $iteration = 0;
     my $notreallydone = 1;
+  retry:
     while($notreallydone) {
         $notreallydone = 0;
 
-        warn "expanding paths..." if $verbose;
-        my %newpaths = %paths;
-        for my $path (values %paths) {
-            if ($done{$path->repr}) {
-                next;
-            }
-            my @calls;
-            push @calls, @{$calls->{""}};
-            my $identifier = $path->slice($path->n - 1, $path->n)->{ppaths}[0]->{patterns}[0]->identifier;
-            push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
-            for my $call (@calls) {
-                my $m = $path->endmatch($call->{in});
-                my $n = $call->{in}->n;
+        my $retry = $paths;
+        my $do_retry = 0;
+#        my %oldpaths = $oldpaths ? %$oldpaths : ();
 
-                if ($m) {
-                    my $newpath;
+        my %newpaths = %$paths;
+        my $newpaths = \%newpaths;
+        my @paths = values %$paths;
+        $paths = { };
 
-                    if (0 && $path->slice($m->[0], $m->[0]+1)->match($call->{out}->slice(0, 1))) {
-                        # XXX actually merge the matching pattern.
-                        $newpath = $path->slice(0, $m->[0]+1)->concat($call->{out}->slice(1, undef));
-                    } else {
-                        $newpath = $path->slice(0, $m->[0]+$n)->concat_overlapping($call->{out}, $n)->intern;
+        for my $path (@paths) {
+            unless (exists $oldpaths->{$path->short_repr($last)}) {
+                my @calls;
+                push @calls, @{$calls->{""}};
+                my $identifier = $path->last_identifier;
+                push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
+                for my $call (@calls) {
+                    my $m = $path->endmatch($call->{in});
+                    my $n = $call->{in}->n;
+
+                    if ($m) {
+                        my $newpath;
+
+                        if (0 && $path->slice($m->[0], $m->[0]+1)->match($call->{out}->slice(0, 1))) {
+                            # XXX actually merge the matching pattern.
+                            $newpath = $path->slice(0, $m->[0]+1)->concat($call->{out}->slice(1, undef));
+                        } else {
+                            $newpath = $path->slice(0, $m->[0]+$n)->concat_overlapping($call->{out}, $n);
+                        }
+
+                        next if $newpath->cycle or !defined($newpath);
+
+                        $newpaths->{$newpath->repr} = $newpath;
+                        # print $newpath->repr . "\n";
                     }
-
-                    next if $newpath->cycle or !defined($newpath);
-
-                    $newpaths{$newpath->repr} = $newpath;
-                    # print $newpath->repr . "\n";
                 }
+                $oldpaths->{$path->short_repr($last)}->{$path->repr} = 1
+                    unless $oldpaths->{$path->short_repr($last)};
             }
-            $done{$path->repr} = 1;
+            # delete $paths->{$path->repr};
         }
+        @paths = ();
 
-        warn "done. " . scalar(keys %newpaths) . " paths" if $verbose;
+        my $rules = read_rules(@rules_files);
+        my $badrules = read_rules(@badrules_files);
+        my $done = 0;
+        while (!$done) {
+            $done = 1;
 
+            my @newpaths = values %$newpaths;
+            $newpaths = { };
 
-        warn "applying rules..." if $verbose;
-        my $notdone = 1;
-        while ($notdone) {
-            $notdone = 0;
-
-            my %outpaths;
-
-            for my $path (values %newpaths) {
-                if ($done2{$path->repr}) {
-                    for my $outpath (@{$done2{$path->repr}}) {
-                        $outpaths{$outpath->repr} = $outpath;
-                    }
-                    next;
-                }
+            for my $path (@newpaths) {
                 next unless defined $path;
                 if ($path->cycle) {
                     next;
@@ -251,7 +260,7 @@ while ($loop_rules--) {
                 my $res = path_expansions($path, $rules);
 
                 if ($res) {
-                    $notdone = 1 if @$res > 1;
+                    #$done = 0 if @$res > 1;
                     for my $outpath (@$res) {
                         next if $outpath->cycle;
                         push @outpaths, $outpath;
@@ -259,55 +268,69 @@ while ($loop_rules--) {
                 } else {
                     push @outpaths, $path;
                 }
-                $done2{$path->repr} = \@outpaths;
                 for my $outpath (@outpaths) {
-                    $outpaths{$outpath->repr} = $outpath;
+                    unless (exists $oldpaths->{$outpath->short_repr($last)}) {
+                        $paths->{$outpath->repr} = $outpath;
+                    }
+                }
+
+                my $bres = path_expansions($path, $badrules);
+                if (@$bres != 1) {
+                    warn "bad path " . $path->repr;
+                    $do_retry = 1;
                 }
             }
-
-            %newpaths = %outpaths;
         }
-        warn "done. " . scalar(keys %newpaths) . " paths." if $verbose;
+        warn scalar(keys %$paths) . " new paths, " . scalar(keys %$oldpaths) . " old paths.. iteration $iteration, last $last." if $verbose;
 
-        $notreallydone ||= (scalar(keys %paths) != scalar(keys %newpaths));
+        $notreallydone ||= (0 != scalar(keys %$paths));
 
-        %paths = ();
+        # warn "shortening paths ..." if $verbose;
+        # for my $path (shuffle values %paths) {
+        #     my $repr = $path->short_repr($last);
+        #     unless (exists $oldpaths{$repr}) {
+        #         $oldpaths{$repr} = $path->repr;
+        #     }
+        # }
+        # warn "done. " . scalar(keys %oldpaths) . " paths, iteration " . $iteration . "." if $verbose;
 
-        warn "shortening paths ..." if $verbose;
-        for my $path (shuffle values %newpaths) {
-            my $spath = $path->slice($path->n - $last, $path->n);
-            my $repr = $spath->repr;
-            if (!$paths{$repr} or Scaga::cmppath($path, $paths{$repr}) < -2) {
-                $paths{$repr} = $path;
-            }
-        }
-        warn "done. " . scalar(keys %paths) . " paths, iteration " . $iteration . "." if $verbose;
+#        for my $rule (@rules) {
+#            $usecount{$rule->repr} += $rule->{usecount};
+#        }
 
-        for my $rule (@rules) {
-            $usecount{$rule->repr} += $rule->{usecount};
-        }
+        # my $fh;
+        # open $fh, ">rules-last-$last-iteration-$iteration.scaga";
+        # for my $rule (sort { $usecount{$b} <=> $usecount{$a} } map { $_->repr } @rules) {
+        #     print $fh ($usecount{$rule} . ": " . $rule . "\n");
+        # }
+        # close $fh;
 
         my $fh;
-        open $fh, ">rules-iteration-$iteration.scaga";
-        for my $rule (sort { $usecount{$b} <=> $usecount{$a} } map { $_->repr } @rules) {
-            print $fh ($usecount{$rule} . ": " . $rule . "\n");
-        }
-        close $fh;
-
-        my $fh;
-        open $fh, ">se-iteration-$iteration.scaga";
-        for my $path (values %paths) {
-            print $fh $path->repr . "\n";
-            if ($path->last_identifier eq "Ffuncall") {
-                warn $path->repr;
-                next rules_loop if rand() < .3;
+        open $fh, ">se-last-$last-iteration-$iteration.scaga";
+        for my $hash (values %$oldpaths) {
+            if (ref $hash) {
+                for my $path (keys %$hash) {
+                    print $fh $path . "\n";
+                }
+            } else {
+                print $fh $hash . "\n";
             }
         }
         close $fh;
+        for my $s (keys %$oldpaths) {
+            $oldpaths->{$s} = 1;
+        }
+        if ($do_retry) {
+            $paths = $retry;
+            $notreallydone = 1;
+#            $oldpaths = \%oldpaths;
+            next retry;
+        }
+
         $iteration++;
     }
 
-    for my $path (values %paths) {
-        print $path->repr . "\n";
+    for my $path (values %$oldpaths) {
+        print $path . "\n";
     }
 }
