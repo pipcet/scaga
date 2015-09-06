@@ -404,7 +404,7 @@ sub intern {
     return $Scaga::Path::paths{$repr} if $Scaga::Path::paths{$repr};
 
     $self->{interned} = 1;
-    $Scaga::Path::paths{$repr} = $self;
+    #$Scaga::Path::paths{$repr} = $self;
 
     return $self;
 }
@@ -415,6 +415,18 @@ sub repr {
     return $self->{repr} if (defined $self->{repr});
 
     return $self->{repr} = join(" >> ", map { $_->repr } @{$self->{ppaths}});
+}
+
+sub short_repr {
+    my ($self, $last) = @_;
+    return $self->{short_repr}->{$last} if exists $self->{short_repr}->{$last};
+
+    my $spath = $self->slice($self->n - $last, $self->n);
+    my $repr = $spath->repr;
+
+    $self->{short_repr}->{$last} = $repr;
+
+    return $repr;
 }
 
 sub identifiers {
@@ -593,21 +605,19 @@ sub match {
 
 sub cycle {
     my ($self) = @_;
-    my @patterns;
-
-    for my $ppath (@{$self->{ppaths}}) {
-        for my $pattern (@{$ppath->{patterns}}) {
-            push @patterns, $pattern;
+    if (exists $self->{cycle}) {
+        return $self->{cycle};
+    }
+    my @identifiers = $self->identifiers;
+    for my $i (0 .. $#identifiers) {
+        for my $j ($i+1 .. $#identifiers) {
+            if ($identifiers[$i] eq $identifiers[$j]) {
+                return $self->{cycle} = [$i, $j];
+            }
         }
     }
 
-    for my $i (0 .. $#patterns) {
-        for my $j ($i+1 .. $#patterns) {
-            return [$i, $j] if $patterns[$i]->match($patterns[$j]);
-        }
-    }
-
-    return undef;
+    return $self->{cycle} = undef;
 }
 
 sub cmp {
