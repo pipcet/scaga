@@ -178,7 +178,6 @@ sub read_rules {
         close $fh;
     }
     my $rules = hash_rules(@rules);
-    warn "done. " . scalar(@rules) . " rules" if $verbose;
 
     return $rules;
 }
@@ -201,7 +200,7 @@ while ($loop_rules--) {
 
         my $retry = $paths;
         my $do_retry = 0;
-#        my %oldpaths = $oldpaths ? %$oldpaths : ();
+        my %oldpaths = $oldpaths ? %$oldpaths : ();
 
         my %newpaths = %$paths;
         my $newpaths = \%newpaths;
@@ -234,8 +233,7 @@ while ($loop_rules--) {
                         # print $newpath->repr . "\n";
                     }
                 }
-                $oldpaths->{$path->short_repr($last)}->{$path->repr} = 1
-                    unless $oldpaths->{$path->short_repr($last)};
+                $oldpaths->{$path->short_repr($last)}->{$path->repr} = 1;
             }
             # delete $paths->{$path->repr};
         }
@@ -294,16 +292,19 @@ while ($loop_rules--) {
         # }
         # warn "done. " . scalar(keys %oldpaths) . " paths, iteration " . $iteration . "." if $verbose;
 
-#        for my $rule (@rules) {
-#            $usecount{$rule->repr} += $rule->{usecount};
-#        }
+        for my $hash (values %$rules) {
+            for my $rule (@$hash) {
+                $usecount{$rule->repr} += $rule->{usecount};
+                $rule->{usecount} = 0;
+            }
+        }
 
-        # my $fh;
-        # open $fh, ">rules-last-$last-iteration-$iteration.scaga";
-        # for my $rule (sort { $usecount{$b} <=> $usecount{$a} } map { $_->repr } @rules) {
-        #     print $fh ($usecount{$rule} . ": " . $rule . "\n");
-        # }
-        # close $fh;
+        my $fh;
+        open $fh, ">rules-last-$last-iteration-$iteration.scaga";
+        for my $rule (sort { $usecount{$b} <=> $usecount{$a} } keys %usecount) {
+            print $fh ($usecount{$rule} . ": " . $rule . "\n");
+        }
+        close $fh;
 
         my $fh;
         open $fh, ">se-last-$last-iteration-$iteration.scaga";
@@ -317,13 +318,10 @@ while ($loop_rules--) {
             }
         }
         close $fh;
-        for my $s (keys %$oldpaths) {
-            $oldpaths->{$s} = 1;
-        }
         if ($do_retry) {
             $paths = $retry;
             $notreallydone = 1;
-#            $oldpaths = \%oldpaths;
+            $oldpaths = \%oldpaths;
             next retry;
         }
 
