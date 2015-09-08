@@ -50,7 +50,11 @@
    ((numberp type)
     (forward-line (- type)))
    ((eq type 'defun)
-    (re-search-backward "^[^ \t\n]" nil t)))
+    (re-search-backward "^[^ \t\n]" nil t)
+    (while (looking-at-p "^{")
+      (re-search-backward "^[^ \t\n]" nil t))
+    (re-search-backward "^[ \t\n]" nil t)
+    (forward-line)))
   (point))
 
 (defun scaga-excerpt-end (type)
