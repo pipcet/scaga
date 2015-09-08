@@ -2,6 +2,7 @@
 use Carp::Always;
 use IPC::Run qw/run new_chunker timeout start/;
 use File::Slurp qw/slurp read_file/;
+use strict;
 
 my $calls;
 eval("\$calls = " . read_file($ARGV[0]));
@@ -12,50 +13,46 @@ eval("\$calls = " . read_file($ARGV[0]));
 
 sub fixup {
     my ($call) = @_;
-    my ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id, $component, $intype) = @$call;
 
-    if ($callee_type =~ /\n/ms) {
-        $callee_type =~ s/.*type = //msg;
+    if ($call->{callee_type} =~ /\n/ms) {
+        $call->{callee_type} =~ s/.*type = //msg;
     }
 
-    if ($callee_type =~ /\(\*\*\)/) {
-        $callee_type =~ s/\(\*\*\)/\(\*\)/;
-        $callee = $callee_type;
+    if ($call->{callee_type} =~ /\(\*\*\)/) {
+        $call->{callee_type} =~ s/\(\*\*\)/\(\*\)/;
+        $call->{callee} = $call->{callee_type};
     }
 
-    if ($callee =~ /\(\*\)/) {
-        $callee_id = $callee_type;
+    if ($call->{callee} =~ /\(\*\)/) {
+        $call->{callee_id} = $call->{callee_type};
     }
-
-    @$call = ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id, $component, $intype);
 }
 
 for my $call (@$calls) {
     fixup($call);
-    my ($caller, $callee, $file, $line, $col, $caller_type, $callee_type, $codeline, $caller_id, $callee_id, $component, $intype) = @$call;
 
-    $codeline =~ s/\'//g;
-    $codeline =~ s/ > />/g;
-    $codeline =~ s/ >> />>/g;
-    $codeline =~ s/ = /=/g;
-    $codeline =~ s/\n/ /msg;
-    $caller =~ s/\* \(\*\)/\*\(\*\)/msg;
-    $callee =~ s/\* \(\*\)/\*\(\*\)/msg;
-    $caller =~ s/\* \*/\*\*/msg;
-    $callee =~ s/\* \*/\*\*/msg;
-    $callee =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
-    $caller =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
+    $call->{codeline} =~ s/\'//g;
+    $call->{codeline} =~ s/ > />/g;
+    $call->{codeline} =~ s/ >> />>/g;
+    $call->{codeline} =~ s/ = /=/g;
+    $call->{codeline} =~ s/\n/ /msg;
+    $call->{caller} =~ s/\* \(\*\)/\*\(\*\)/msg;
+    $call->{callee} =~ s/\* \(\*\)/\*\(\*\)/msg;
+    $call->{caller} =~ s/\* \*/\*\*/msg;
+    $call->{callee} =~ s/\* \*/\*\*/msg;
+    $call->{callee} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
+    $call->{caller} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
 
-    $component = defined($component) ? " = component:$component" : "";
-    $intype = (defined($intype) and $intype ne "") ? " = intype:$intype" : "";
+    $call->{component} = defined($call->{component}) ? (" = component:" . $call->{component}) : "";
+    $call->{intype} = (defined($call->{intype}) and $call->{intype} ne "") ? (" = intype:" . $call->{intype}) : "";
 
-    next if ($caller eq $callee) and !defined($component); # XXX distinguish actual recursive
+    next if ($call->{caller} eq $call->{callee}) and !defined($call->{component}); # XXX distinguish actual recursive
                                 # calls from type-only fake calls.
 
-    if (defined($component) and $caller eq $callee) {
-        print "$caller_type$component > $caller\n"
+    if (defined($call->{component}) and $call->{caller} eq $call->{callee}) {
+        print $call->{caller_type} . $call->{component} . " > " . $call->{caller} . "\n";
     }
-    print "$caller = FLC:$file:$line:$col = \'$codeline\' = $caller_id > $callee = $callee_id$component$intype\n";
-    print "$caller_type > $caller\n" unless $caller_type eq $caller or $caller_type eq "" or $caller eq "";
-    print "$callee_type > $callee\n" unless $callee_type eq $callee or $callee_type eq "" or $callee eq "";
+    print $caller." = "."FLC:".$file.":".$line.":".$col." = \'".$codeline."\' = ".$caller_id." > ".$callee." = ".$callee_id.$component.$intype ."\n";
+    print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $caller_type eq $caller or $caller_type eq "" or $caller eq "";
+    print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $callee_type eq $callee or $callee_type eq "" or $callee eq "";
 }
