@@ -237,6 +237,8 @@ while ($loop_rules--) {
     my $notreallydone = 1;
  retry:
     while($notreallydone) {
+        my $rules = read_rules(@rules_files);
+        my $badrules = read_rules(@badrules_files);
         $notreallydone = 0;
 
         my $retry = $paths;
@@ -249,13 +251,14 @@ while ($loop_rules--) {
         $paths = { };
 
         for my $path (@paths) {
-            unless (exists $oldpaths->{$path->short_repr($last)}) {
+            unless (exists $oldpaths->{$path->short_repr($last, $rules)}) {
                 my @calls;
                 push @calls, @{$calls->{""}};
                 my $identifier = $path->last_identifier;
                 push @calls, @{$calls->{$identifier}} if defined $identifier and $calls->{$identifier};
                 for my $call (@calls) {
-                    my $m = $path->endmatch($call->{in});
+                    my $match_param = { lstrict => { component => 1 }};
+                    my $m = $path->endmatch($call->{in}, $match_param);
                     my $n = $call->{in}->n;
 
                     if ($m) {
@@ -274,14 +277,14 @@ while ($loop_rules--) {
                         # print $newpath->repr . "\n";
                     }
                 }
-                $oldpaths->{$path->short_repr($last)}->{$path->repr} = 1;
+                $oldpaths->{$path->short_repr($last, $rules)}->{$path->repr} = 1;
             }
             # delete $paths->{$path->repr};
         }
         @paths = ();
 
-        my $rules = read_rules(@rules_files);
-        my $badrules = read_rules(@badrules_files);
+        $rules = read_rules(@rules_files);
+        $badrules = read_rules(@badrules_files);
         my $done = 0;
         while (!$done) {
             $done = 1;
@@ -327,7 +330,7 @@ while ($loop_rules--) {
                 }
 
                 for my $outpath (@outpaths) {
-                    unless (exists $oldpaths->{$outpath->short_repr($last)}) {
+                    unless (exists $oldpaths->{$outpath->short_repr($last, $rules)}) {
                         $paths->{$outpath->repr} = $outpath;
                     }
                 }
