@@ -1,15 +1,12 @@
-(defvar scaga-process nil)
-(defvar scaga-marker nil)
-(defvar scaga-out-buffer (find-file-noselect "/home/pip/git/scaga/scaga.out"))
 (defvar scaga-timer nil)
-(defvar scaga-rules-buffer (find-file-noselect "/home/pip/git/scaga/rules-from-elisp.scaga"))
 (defvar scaga-next nil)
 
 (defun scaga-start (&rest args)
-  (setq scaga-process (apply #'start-process "SCAGA" "*scaga*" args))
-  (with-current-buffer "*scaga*"
-    (setq scaga-marker (copy-marker (point) nil)))
-  (setq scaga-out-buffer (get-buffer-create "scaga.out")))
+  (let ((pbuffer (generate-new-buffer "*scaga*"))
+        (buffer (current-buffer)))
+    (with-current-buffer pbuffer
+      (set (make-local-variable 'scaga-buffer) buffer)))
+  (setq scaga-process (apply #'start-process "SCAGA" pbuffer args)))
 
 (defun scaga-insert-excerpt (file around-line)
   (when nil
@@ -21,13 +18,14 @@
     (insert (propertize excerpt 'face '(:background "#ffffcc"))))))
 
 (defun scaga-r-command (beg end)
+  "Create a new rule covering the selected region."
   (interactive "r")
   (when (or (not (use-region-p))
             (= beg end))
     (setq beg (save-excursion (beginning-of-line) (point))
           end (save-excursion (end-of-line) (point))))
-  (let ((comment (read-from-minibuffer "Comment: "))
-        (path (scaga-region-to-path beg end)))
+  (let* ((path (scaga-region-to-path beg end))
+         (comment (read-from-minibuffer (concat "Comment for rule " path ": "))))
     (with-current-buffer scaga-rules-buffer
       (save-excursion)
       (goto-char (point-max))
@@ -151,10 +149,10 @@
         (push pattern patterns2)))
     (message (mapconcat #'identity patterns2 " > "))))
 
-(defun scaga-update ()
-  (set-marker scaga-marker 1 (marker-buffer scaga-marker))
-  (with-current-buffer (marker-buffer scaga-marker)
-    (goto-char scaga-marker)
+(defun scaga-update (buffer)
+  (with-current-buffer
+      (with-current-buffer buffer (process-buffer scaga-process))
+    (goto-char 1)
     (while (looking-at-p ".*\n")
       (save-match-data
         (re-search-forward "\\(.*?\\)\n" nil t)
@@ -195,7 +193,7 @@
                    'face
                    `(:background "#ccccff"))
                   lines)
-            (with-current-buffer scaga-out-buffer
+            (with-current-buffer scaga-buffer
               (save-excursion
                 (goto-char (point-max))
                 (dolist (line lines)
@@ -208,17 +206,15 @@
             (when (process-live-p scaga-process)
               (process-send-string scaga-process (concat (or scaga-next "--next") "\n")))
             (setq scaga-next nil))
-          (with-current-buffer scaga-out-buffer
+          (with-current-buffer scaga-buffer
             (save-excursion
               (goto-char (point-max))
               (insert "\n")))
-          (delete-region scaga-marker (point)))))))
-
-(defvar scaga-mode-map)
+          (delete-region 1 (point)))))))
 
 (define-derived-mode scaga-mode special-mode "SCAGA"
-  "SCAGA mode, see https://github.com/pipcet/scaga")
-
+  "SCAGA mode, see https://github.com/pipcet/scaga"
+  (set (make-local-variable 'scaga-timer) (run-with-timer 0 1 #'scaga-update (current-buffer))))
 
 (define-key scaga-mode-map (kbd "TAB") #'scaga-tab-command)
 (define-key scaga-mode-map (kbd "RET") #'scaga-ret-command)
@@ -230,26 +226,48 @@
 (define-key scaga-mode-map (kbd "l") #'scaga-l-command)
 (define-key scaga-mode-map (kbd "L") #'scaga-L-command)
 
-(provide 'scaga-mode)
-
 (defun scaga-restart ()
   (interactive)
   (ignore-errors (kill-process scaga-process))
-  (with-current-buffer scaga-out-buffer
-    (setq buffer-read-only nil)
-    (delete-region (point-min) (point-max)))
-  (with-current-buffer "*scaga*"
-    (delete-region (point-min) (point-max)))
-  (set-marker scaga-marker 1 (marker-buffer scaga-marker))
-  (scaga-start "perl" "/home/pip/git/scaga/scaga-extend.pl" "--calls=/home/pip/git/scaga/emacs-calls.scaga" "--rules=/home/pip/git/scaga/rules-from-elisp.scaga" "--badrules=/home/pip/git/scaga/badrules.scaga" "--last=1" "--wait-for-next=1" "--loop-rules=-1" "/home/pip/git/scaga/call.scaga"))
-
-(with-current-buffer scaga-out-buffer
   (setq buffer-read-only nil)
-  (delete-region (point-min) (point-max)))
-(with-current-buffer "*scaga*"
-  (delete-region (point-min) (point-max)))
+  (delete-region (point-min) (point-max))
+  (with-current-buffer (process-buffer scaga-process)
+    (delete-region (point-min) (point-max)))
+  (apply #'scaga-start scaga-args))
 
+(defun scaga ()
+  (interactive)
+  (let ((buffer (get-buffer-create "*SCAGA*"))
+        args)
+    (with-current-buffer buffer
+      (set (make-local-variable 'scaga-path) (read-file-name "path to scaga-extend.pl: "))
+      (set (make-local-variable 'scaga-exec) (read-file-name "path to executable: "))
+      (set (make-local-variable 'scaga-source) (read-directory-name "path to source code: "))
+      (set (make-local-variable 'scaga-rules-dir) (read-directory-name "path to rules.scaga, badrules.scaga, calls.scaga, and call.scaga: "))
+      (set (make-local-variable 'scaga-rules) (list (concat scaga-rules-dir "/rules.scaga")))
+      (set (make-local-variable 'scaga-calls) (list (concat scaga-rules-dir "/calls.scaga")))
+      (set (make-local-variable 'scaga-badrules) (list (concat scaga-rules-dir "/badrules.scaga")))
+      (set (make-local-variable 'scaga-call) (list (concat scaga-rules-dir "/call.scaga")))
+      (set (make-local-variable 'scaga-rules-buffer) (find-file-noselect scaga-rules))
+      (push "perl" args)
+      (push scaga-path args)
+      (push (concat "--executable=" scaga-exec) args)
+      (dolist (scaga-rules-file scaga-rules)
+        (push (concat "--rules=" scaga-rules-file) args))
+      (dolist (scaga-badrules-file scaga-badrules)
+        (push (concat "--badrules=" scaga-badrules-file) args))
+      (dolist (scaga-calls-file scaga-calls)
+        (push (concat "--calls=" scaga-calls-file) args))
+      (dolist (scaga-call-file scaga-call)
+        (push scaga-call-file args))
+      (push "--last=1" args)
+      (push "--wait-for-next=1" args)
+      (push "--loop-rules=-1" args)
+      (setq args (nreverse args))
+      (set (make-local-variable 'scaga-args) args)
+      (set (make-local-variable 'scaga-process) nil)
+      (apply #'scaga-start args)
+      (scaga-mode))))
 
-(run-with-timer 0 1 #'scaga-update)
-
+(provide 'scaga-mode)
 
