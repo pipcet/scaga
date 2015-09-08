@@ -221,6 +221,7 @@ if ($do_symbols) {
     open $fh, "nm emacs| cut -c 20- |" or die;
     my @symbols = <$fh>;
     my %symbols;
+    my %symbol_components;
     map { chomp } @symbols;
     close $fh;
 
@@ -246,15 +247,19 @@ if ($do_symbols) {
             my $function;
             my $component;
 
-            # hack: skip Emacs Sblah unions.
-            if ($symbol =~ /^S/) {
-                #next;
+            while ($output =~ s/([a-zA-Z0-9_][a-zA-Z0-9_]*) = //ms) {
+                push @symbols, "$symbol\.$1";
+                $symbols{"$symbol\.$1"} = p("main", "$symbol\.$1");
+                push @{$symbol_components{$symbol}}, $1;
+                $done = 0;
+            }
+            if ($output =~ s/0x[0-9a-f]+ \<(.*?)\>$//ms) {
+                my ($function) = ($1);
+                for my $component (@{$symbol_components{$symbol}}) {
+                    register_suggested_type($function, "...", 0, 0, $component, $symbol);
+                }
             }
 
-            while ($output =~ s/([a-zA-Z0-9_][a-zA-Z0-9_]*) = 0x[0-9a-f]+ \<(.*?)\>//ms) {
-                my ($component, $function) = ($1, $2);
-                register_suggested_type($function, "...", 0, 0, $component, $symbol);
-            }
             delete $symbols{$symbol};
         }
     }
