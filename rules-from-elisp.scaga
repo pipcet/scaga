@@ -1,0 +1,42 @@
+# noreturn
+terminate_due_to_signal
+# noreturn
+shut_down_emacs
+# impossible
+Fdelete_terminal > delete_terminal
+# impossible
+gobble_input > Fdelete_terminal > safe_call2
+# live
+Fdelete_terminal > component:delete_terminal_hook > delete_terminal > delete_frame > do_switch_frame > resize_mini_window
+# live
+Fdelete_terminal > component:delete_terminal_hook > delete_terminal > delete_frame > x_clear_frame_selections > Frun_hook_with_args
+# noreturn
+process_quit_flag
+# noreturn
+Fkill_emacs
+# impossible
+Fdelete_terminal > component:delete_terminal_hook > delete_terminal
+# noreturn
+handle_interrupt
+# live
+x_io_error_quitter > x_connection_closed > delete_frame > x_clear_frame_selections > Frun_hook_with_args
+# live
+x_io_error_quitter > x_connection_closed > delete_frame > do_switch_frame > resize_mini_window
+# live
+x_io_error_quitter > x_connection_closed > delete_frame > safe_call2 > safe_call
+# live
+x_io_error_quitter > x_connection_closed > delete_frame > x_clear_frame_selections > Frun_hook_with_args
+# noreturn
+error
+# live
+x_io_error_quitter > x_connection_closed > delete_frame > check_minibuf_window > set_window_buffer > run_window_configuration_change_hook
+# lazy
+store_symval_forwarding
+# noreturn
+memory_full
+# live
+delete_terminal > delete_frame > x_clipboard_manager_save_frame
+# lazy
+x_clipboard_manager_save_frame
+# noreturn
+wrong_type_argument
