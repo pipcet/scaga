@@ -104,7 +104,11 @@ sub pump {
         my $handler = shift @handlers;
         $handler->();
     }
-    $h->pump_nb;
+    if (@handlers) {
+        $h->pump;
+    } else {
+        $h->pump_nb;
+    }
 }
 
 sub sync {
