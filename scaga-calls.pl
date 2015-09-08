@@ -314,8 +314,9 @@ while (<>) {
         my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
         my ($comp, $inexpr);
 
-        if (($callee =~ /^_/ or $callee =~ /\./)&& $types{$callee}) {
-            ($comp, $inexpr) = @{$components{$callee}};
+        if (($callee =~ /^_/ or $callee =~ /\./) && $types{$callee}) {
+            ($comp, $inexpr) = @{$components{$callee}}
+                if $components{$callee};
             $callee = $types{$callee};
         }
 
@@ -326,7 +327,7 @@ while (<>) {
         # $callers{$callee}{$caller} = 1;
         register_call($caller, $callee, $file, $line, $col, $comp, $inexpr, 'real');
     }
-    if (/>>\[(.*?):([0-9]*?):([0-9*])\] gimple_bind/) {
+    if (/>>\[(.*?):([0-9]*?):([0-9]*)\] gimple_bind/) {
         my ($file, $line, $col) = ($1, $2, $3);
 
         register_function($caller, $file, $line, $col, $component);
