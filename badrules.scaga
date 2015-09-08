@@ -1,1 +1,10 @@
+Frun_hook_with_args
 Ffuncall
+resize_mini_window
+wait_reading_process_output
+run_window_configuration_change_hook
+add_text_properties_from_list
+safe_call
+graft_intervals_into_buffer
+Fautoload_do_load
+signal_after_change
