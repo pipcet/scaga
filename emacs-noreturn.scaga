@@ -1,0 +1,37 @@
+config.h:/* The _Noreturn keyword of C11.  */
+config.h:#if ! (defined _Noreturn \
+config.h:#  define _Noreturn __attribute__ ((__noreturn__))
+config.h:#  define _Noreturn __declspec (noreturn)
+config.h:#  define _Noreturn
+globals.h:_Noreturn EXFUN (Fabort_recursive_edit, 0);
+globals.h:_Noreturn EXFUN (Fexit_recursive_edit, 0);
+globals.h:_Noreturn EXFUN (Fkill_emacs, 1);
+globals.h:_Noreturn EXFUN (Fthrow, 2);
+globals.h:_Noreturn EXFUN (Ftop_level, 0);
+lisp.h:extern _Noreturn void die (const char *, const char *, int);
+lisp.h:extern _Noreturn Lisp_Object wrong_type_argument (Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void wrong_choice (Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void args_out_of_range (Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void args_out_of_range_3 (Lisp_Object, Lisp_Object,
+lisp.h:extern _Noreturn void buffer_overflow (void);
+lisp.h:_Noreturn void __executable_start (void);
+lisp.h:extern _Noreturn void memory_full (size_t);
+lisp.h:extern _Noreturn void buffer_memory_full (ptrdiff_t);
+lisp.h:extern _Noreturn void string_overflow (void);
+lisp.h:extern _Noreturn void xsignal (Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void xsignal0 (Lisp_Object);
+lisp.h:extern _Noreturn void xsignal1 (Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void xsignal2 (Lisp_Object, Lisp_Object, Lisp_Object);
+lisp.h:extern _Noreturn void xsignal3 (Lisp_Object, Lisp_Object, Lisp_Object,
+lisp.h:extern _Noreturn void signal_error (const char *, Lisp_Object);
+lisp.h:extern _Noreturn void error (const char *, ...) ATTRIBUTE_FORMAT_PRINTF (1, 2);
+lisp.h:extern _Noreturn void verror (const char *, va_list)
+lisp.h:extern _Noreturn void time_overflow (void);
+lisp.h:extern _Noreturn void nsberror (Lisp_Object);
+lisp.h:extern _Noreturn void report_file_errno (const char *, Lisp_Object, int);
+lisp.h:extern _Noreturn void report_file_error (const char *, Lisp_Object);
+lisp.h:extern _Noreturn void terminate_due_to_signal (int, int);
+lisp.h: _Noreturn
+lisp.h:extern _Noreturn void emacs_abort (void) NO_INLINE;
+lisp.h:extern _Noreturn void fatal (const char *msgid, ...)
+puresize.h:extern _Noreturn void pure_write_error (Lisp_Object);

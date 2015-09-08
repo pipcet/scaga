@@ -1,0 +1,30 @@
+/CHECK_CODING_SYSTEM_GET_ID \(/ > Fcheck_coding_system > safe_eval
+/Qnoelisp/ > delete_frame > check_minibuf_window > Fselect_window > select_window
+/Qnoelisp/ > delete_frame > check_minibuf_window > set_window_buffer
+/Qnoelisp/ > delete_frame > do_switch_frame > Fselect_window > select_window
+/Qnoelisp/ > delete_frame > x_clear_frame_selections = /Qx_lost_selection_functions/ > Frun_hook_with_args
+/decode_coding_c_string/ > decode_coding_object = /CODING_ATTR_POST_READ \(attrs\)/ > safe_call1
+/decode_coding_c_string/ > decode_coding_object > code_conversion_save > make_conversion_work_buffer
+/decode_coding_c_string/ > decode_coding_object > decode_coding > component:decoder > /CODING_DECODE_CHAR \(/ > decode_char > load_charset > load_charset_map_from_vector
+/decode_coding_c_string/ > decode_coding_object > decode_coding > component:decoder > decode_eol > del_range_2
+/decode_coding_c_string/ > decode_coding_object > decode_coding > component:decoder > encode_coding
+/decode_coding_c_string/ > decode_coding_object > decode_coding > decode_eol > del_range_2
+/decode_coding_c_string/ > decode_coding_object > decode_coding > get_translation_table > Fcopy_sequence > concat > add_text_properties_from_list
+/decode_coding_c_string/ > decode_coding_object > decode_coding > produce_annotation > produce_charset > Fput_text_property
+/decode_coding_c_string/ > decode_coding_object > decode_coding > produce_annotation > produce_composition > compose_text > Fput_text_property
+/decode_coding_c_string/ > decode_coding_object > detect_coding > setup_coding_system > Fcheck_coding_system > safe_eval
+/f, width, height, 5, 0, Qxg_frame_set_char_size/ > adjust_frame_size > call2 | run_window_configuration_change_hook | sanitize_window_sizes
+adjust_frame_size > frame_windows_min_size | resize_frame_windows
+clear_mouse_face > show_mouse_face > display_and_set_cursor > erase_phys_cursor > draw_fringe_bitmap > draw_fringe_bitmap_1 > lookup_derived_face | lookup_named_face
+draw_fringe_bitmap > draw_fringe_bitmap_1 > lookup_derived_face | lookup_named_face
+encode_char > load_charset > load_charset_map_from_vector > add_to_log
+handle_one_xevent > setup_coding_system > Fcheck_coding_system > safe_eval
+load_charset > load_charset_map_from_file
+load_charset > load_charset_map_from_vector > add_to_log
+note_mode_line_or_margin_highlight > get_keymap > Fautoload_do_load
+note_mouse_highlight > face_at_string_position > lookup_face | merge_face_ref
+note_mouse_highlight > mouse_face_from_buffer_pos > face_at_buffer_position > lookup_basic_face | lookup_face | merge_face_ref
+note_mouse_highlight > note_mode_line_or_margin_highlight > face_at_string_position > lookup_face | merge_face_ref
+x_io_error_quitter > x_connection_closed > delete_frame > Fdelete_terminal > safe_call2 > safe_call
+menubar_map_cb | setup_ccl_program | tb_size_cb | x_kill_gs_process | x_term_init
+unbind_to

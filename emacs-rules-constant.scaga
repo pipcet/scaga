@@ -1,0 +1,42 @@
+/map_char_table \(set_identity,/ > map_char_table > call2 => set_identity
+/map_char_table \(set_identity,/ > map_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => set_identity
+/map_char_table \(set_identity,/ > map_char_table > map_sub_char_table > call2 => set_identity
+/map_char_table \(set_identity,/ > map_char_table > map_sub_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => set_identity
+/map_char_table \(set_canon,/ > map_char_table > call2 => set_identity
+/map_char_table \(set_canon,/ > map_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => set_canon
+/map_char_table \(set_canon,/ > map_char_table > map_sub_char_table > call2 => set_canon
+/map_char_table \(set_canon,/ > map_char_table > map_sub_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => set_canon
+/map_char_table \(shuffle,/ > map_char_table > call2 => shuffle
+/map_char_table \(shuffle,/ > map_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => shuffle
+/map_char_table \(shuffle,/ > map_char_table > map_sub_char_table > call2 => shuffle
+/map_char_table \(shuffle,/ > map_char_table > map_sub_char_table > void (*)(Lisp_Object, Lisp_Object, Lisp_Object) => shuffle
+/decode_coding_c_string/ > decode_coding_object > Fbuffer_string
+/decode_coding_c_string/ > decode_coding_object > del_range_both > del_range_2
+/decode_coding_c_string/ > decode_coding_object > del_range_both > update_compositions
+Fcompare_strings > Fupcase > casify_object > Fcopy_sequence > concat > add_text_properties_from_list
+Fvconcat > concat > add_text_properties_from_list
+/decode_coding_c_string/ > decode_coding_object > set_buffer_internal
+/decode_coding_c_string/ > decode_coding_object > decode_coding > produce_chars > insert_from_gap
+compile_pattern > compile_pattern_1 > Fcopy_sequence > concat > add_text_properties_from_list
+font_add_log > concat2 > concat > add_text_properties_from_list
+font_add_log > concat3 > concat > add_text_properties_from_list
+font_add_log > Fcopy_sequence > concat > add_text_properties_from_list
+Fvconcat > concat > add_text_properties_from_list
+validate_x_resource_name > Fcopy_sequence > concat > add_text_properties_from_list
+fontset_get_font_group > Fcopy_sequence > concat > add_text_properties_from_list
+handle_one_xevent > x_check_fullscreen > change_frame_size > change_frame_size_1 > adjust_frame_size > sanitize_window_sizes
+handle_one_xevent > xg_frame_resized > change_frame_size > change_frame_size_1 > adjust_frame_size > sanitize_window_sizes
+handle_one_xevent > xg_frame_resized > change_frame_size > change_frame_size_1 > adjust_frame_size > call2
+handle_one_xevent > x_check_fullscreen > change_frame_size > change_frame_size_1 > adjust_frame_size > resize_frame_windows
+handle_one_xevent > x_check_fullscreen > change_frame_size > change_frame_size_1 > adjust_frame_size > call2
+handle_one_xevent > x_check_fullscreen > change_frame_size > change_frame_size_1 > adjust_frame_size > frame_windows_min_size
+/decode_coding_c_string/ > decode_coding_object > del_range_both
+/Qnoelisp/ > delete_frame > x_clipboard_manager_save_frame
+set_buffer_internal > set_buffer_internal_1 > Fsymbol_value
+handle_one_xevent > xg_frame_resized > change_frame_size > change_frame_size_1 > adjust_frame_size > run_window_configuration_change_hook
+handle_one_xevent > xg_frame_resized > change_frame_size > change_frame_size_1 > adjust_frame_size > resize_frame_windows
+handle_one_xevent > xg_frame_resized > change_frame_size > change_frame_size_1 > adjust_frame_size > frame_windows_min_size
+selection_data_to_lisp_data > Fput_text_property > Fadd_text_properties > add_text_properties_1 > modify_text_properties
+selection_data_to_lisp_data > Fput_text_property > Fadd_text_properties > add_text_properties_1 > signal_after_change
+x_check_fullscreen > change_frame_size > change_frame_size_1 > adjust_frame_size > run_window_configuration_change_hook
+copy_properties > Fcopy_sequence > concat > add_text_properties_from_list

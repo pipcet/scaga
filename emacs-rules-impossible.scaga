@@ -1,0 +1,32 @@
+int (*)(struct terminal *, struct input_event *) = component:read_socket_hook > tty_read_avail_input
+Fdelete_terminal > delete_terminal
+void (*)(struct terminal *) = component:delete_terminal_hook > delete_terminal
+/specbind.*Qinhibit_redisplay/ > specbind > set_internal > store_symval_forwarding > call1
+/specbind.*Qinhibit_redisplay/ > specbind > set_internal > Fsymbol_value > find_symbol_value > swap_in_symval_forwarding
+/specbind.*Qinhibit_redisplay/ > specbind > Fset_default > store_symval_forwarding > call1
+/specbind.*Qinhibit_redisplay/ > specbind > Fset_default > Fset > store_symval_forwarding > call1
+/specbind.*Qinhibit_redisplay/ > specbind > Fset_default > Fset > Fsymbol_value > find_symbol_value > swap_in_symval_forwarding
+/specbind.*Qinhibit_redisplay/ > specbind > Fset_default > Fset > set_internal > Fsymbol_value > find_symbol_value > swap_in_symval_forwarding
+/specbind.*Qinhibit_redisplay/ > specbind > Fset_default > Fset > set_internal > store_symval_forwarding > call1
+/specbind.*Qinhibit_redisplay/ > specbind > find_symbol_value > swap_in_symval_forwarding > store_symval_forwarding > call1
+/Qsticky/ > store_frame_param > swap_in_global_binding > store_symval_forwarding > call1
+/Qsticky/ > store_frame_param > set_menu_bar_lines
+/Qfullscreen/ > store_frame_param > swap_in_global_binding > store_symval_forwarding > call1
+/Qfullscreen/ > Fframe_parameter > frame_unspecified_color
+/Qfullscreen/ > Fframe_parameter > Fframe_parameters > tty_color_name
+/Qfullscreen/ > Fframe_parameter > Fframe_parameters > frame_unspecified_color
+/Qfullscreen/ > store_frame_param > set_menu_bar_lines
+/Qsticky/ > store_frame_param > swap_in_global_binding > store_symval_forwarding > call1
+/x_clipboard_manager_save/ > internal_condition_case_1 > Lisp_Object (*)(Lisp_Object) => x_clipboard_manager_save
+cmpfn_user_defined
+hashfn_user_defined
+/Qtooltip/ > Fframe_parameter > Fframe_parameters > tty_color_name
+/Qtooltip/ > Fframe_parameter > frame_unspecified_color
+/Qtooltip/ > Fframe_parameter > Fframe_parameters > frame_unspecified_color
+# NULL
+void (*)(Lisp_Object) = component:free_entity = intype:struct font_driver *
+# copy_alist doesn't do properties
+Fcopy_alist > concat > add_text_properties_from_list
+/Qnoelisp/ > Fdelete_terminal > safe_call2
+/Qnoelisp/ > delete_frame > safe_call2
+/Qnoelisp/ > delete_frame > do_switch_frame > resize_mini_window
