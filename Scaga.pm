@@ -589,13 +589,19 @@ sub repr {
 }
 
 sub short_repr {
-    my ($self, $last) = @_;
+    my ($self, $last, $keep) = @_;
+    my $origlast = $last;
     return $self->{short_repr}->{$last} if exists $self->{short_repr}->{$last};
 
     my $spath = $self->slice($self->n - $last, $self->n);
+    while (scalar grep { !$keep->{$_} } $spath->identifiers < $origlast) {
+        $last++;
+        $spath = $self->slice($self->n - $last, $self->n);
+    }
+
     my $repr = $spath->repr;
 
-    $self->{short_repr}->{$last} = $repr;
+    $self->{short_repr}->{$origlast} = $repr;
 
     return $repr;
 }
