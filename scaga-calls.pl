@@ -7,9 +7,16 @@
 use Carp::Always;
 use IPC::Run qw/run new_chunker timeout start/;
 use File::Slurp qw/slurp/;
+use Getopt::Long;
+use strict;
 
 my $DEBUG = 0;
 my @cmd = ("/usr/bin/gdb");
+
+my $do_symbols;
+
+GetOptions("symbols=i" => \$do_symbols);
+
 
 my $in;
 my $out = '';
@@ -31,6 +38,14 @@ select( ( select( $out ), $|=1 )[ 0 ] );
 select( ( select( $comblog ), $|=1 )[ 0 ] );
 
 my $cache = { };
+my @handlers;
+my @calls;
+my $caller;
+my $component;
+my %functions;
+my %components;
+my %types;
+my %lineno;
 
 sub runcmd {
     my ($cmd) = @_;
@@ -183,15 +198,59 @@ sub register_call {
 }
 
 sub register_function {
-    my ($function, $file, $line, $col) = @_;
-
-    return register_call ($function, $function, $file, $line, $col);
-}
-
-sub register_suggested_type {
     my ($function, $file, $line, $col, $component) = @_;
 
     return register_call ($function, $function, $file, $line, $col, $component);
+}
+
+sub register_suggested_type {
+    my ($function, $file, $line, $col, $component, $inexpr) = @_;
+
+    return register_call ($function, $function, $file, $line, $col, $component, $inexpr);
+}
+
+if ($do_symbols) {
+    my $fh;
+    open $fh, "nm emacs| cut -c 20- |" or die;
+    my @symbols = <$fh>;
+    my %symbols;
+    map { chomp } @symbols;
+    close $fh;
+
+    for my $symbol (@symbols) {
+        $symbols{$symbol} = p("main", $symbol);
+    }
+
+    my $done = 0;
+
+    while(!$done) {
+        $done = 1;
+        for my $symbol (@symbols) {
+            if (!exists $symbols{$symbol}) {
+                next;
+            }
+            if (ref $symbols{$symbol}) {
+                $symbols{$symbol} = $symbols{$symbol}->();
+                $done = 0;
+                next;
+            }
+
+            my $output = $symbols{$symbol};
+            my $function;
+            my $component;
+
+            # hack: skip Emacs Sblah unions.
+            if ($symbol =~ /^S/) {
+                #next;
+            }
+
+            while ($output =~ s/([a-zA-Z0-9_][a-zA-Z0-9_]*) = 0x[0-9a-f]+ \<(.*?)\>//ms) {
+                my ($component, $function) = ($1, $2);
+                register_suggested_type($function, "...", 0, 0, $component, $symbol);
+            }
+            delete $symbols{$symbol};
+        }
+    }
 }
 
 while (<>) {
@@ -250,13 +309,12 @@ while (<>) {
 
         # print $caller . " calls " . $callee . "\n";
         # $callers{$callee}{$caller} = 1;
-        $callees{$caller}{$callee} = "$caller > $callee";
-        $call = register_call($caller, $callee, $file, $line, $col, $comp, $inexpr);
+        register_call($caller, $callee, $file, $line, $col, $comp, $inexpr);
     }
     if (/>>\[(.*?):([0-9]*?):([0-9*])\] gimple_bind/) {
         my ($file, $line, $col) = ($1, $2, $3);
 
-        register_function($caller, $file, $line, $col);
+        register_function($caller, $file, $line, $col, $component);
     }
 }
 
@@ -367,11 +425,6 @@ for my $call (@calls) {
 
 use Data::Dumper;
 
-my $fh;
-open $fh, ">calls.dump.pl" or die;
-
-print $fh Dumper(\@calls);
-
-close $fh;
+print Dumper(\@calls);
 
 exit 0;
