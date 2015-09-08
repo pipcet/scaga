@@ -160,20 +160,45 @@ sub path_expansions {
     }
 }
 
+sub read_rule {
+    my ($rule) = @_;
+    my @res;
+
+    if ($rule =~ / \| /) {
+        my $rule0 = $rule;
+        my $rule1 = $rule;
+
+        $rule0 =~ s/( > |^)(.*?) \| (.*?)($| > )/$1$2$4/;
+        $rule1 =~ s/( > |^)(.*?) \| (.*?)($| > )/$1$3$4/;
+
+        push @res, read_rule($rule0);
+        push @res, read_rule($rule1);
+    } else {
+        push @res, Scaga::Rule->new($rule);
+    }
+
+    return @res;
+}
+
 sub read_rules {
     my @rules_files = @_;
     my @rules;
     for my $rules_file (@rules_files) {
+        my $line = 0;
         my $fh;
         open $fh, "<$rules_file" or die;
         while (<$fh>) {
+            $line++;
             chomp;
             s/#.*$//;
             next if $_ eq "";
 
-            my $rule = Scaga::Rule->new($_);
+            for my $rule (read_rule($_)) {
+                $rule->{file} = $rules_file;
+                $rule->{line} = $line;
 
-            push @rules, $rule;
+                push @rules, $rule;
+            }
         }
         close $fh;
     }
@@ -182,7 +207,22 @@ sub read_rules {
     return $rules;
 }
 
+{
+    my $fh;
+    open $fh, ">match.html";
+    print $fh <<'EOF';
+<html>
+  <head>
+    <title>SCAGA matches</title>
+  </head>
+  <body>
+EOF
+
+    close $fh;
+}
+
  rules_loop:
+ retry:
 while ($loop_rules--) {
     warn "reading rules..." if $verbose;
     my %usecount;
@@ -194,7 +234,6 @@ while ($loop_rules--) {
     }
     my $iteration = 0;
     my $notreallydone = 1;
-  retry:
     while($notreallydone) {
         $notreallydone = 0;
 
@@ -266,16 +305,20 @@ while ($loop_rules--) {
                 } else {
                     push @outpaths, $path;
                 }
-                for my $outpath (@outpaths) {
-                    unless (exists $oldpaths->{$outpath->short_repr($last)}) {
-                        $paths->{$outpath->repr} = $outpath;
-                    }
+                if (!@outpaths) {
+                    next;
                 }
 
                 my $bres = path_expansions($path, $badrules);
                 if (@$bres != 1) {
                     warn "bad path " . $path->repr;
-                    $do_retry = 1;
+                    next;
+                }
+
+                for my $outpath (@outpaths) {
+                    unless (exists $oldpaths->{$outpath->short_repr($last)}) {
+                        $paths->{$outpath->repr} = $outpath;
+                    }
                 }
             }
         }
@@ -322,13 +365,21 @@ while ($loop_rules--) {
             $paths = $retry;
             $notreallydone = 1;
             $oldpaths = \%oldpaths;
+            $rules = read_rules(@rules_files);
+            $badrules = read_rules(@badrules_files);
             next retry;
         }
 
         $iteration++;
     }
 
-    for my $path (values %$oldpaths) {
-        print $path . "\n";
+    for my $hash (values %$oldpaths) {
+        if (ref $hash) {
+            for my $path (keys %$hash) {
+                print $path . "\n";
+            }
+        } else {
+            print $hash . "\n";
+        }
     }
 }
