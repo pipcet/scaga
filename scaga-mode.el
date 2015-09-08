@@ -5,8 +5,8 @@
   (let ((pbuffer (generate-new-buffer "*scaga*"))
         (buffer (current-buffer)))
     (with-current-buffer pbuffer
-      (set (make-local-variable 'scaga-buffer) buffer)))
-  (setq scaga-process (apply #'start-process "SCAGA" pbuffer args)))
+      (set (make-local-variable 'scaga-buffer) buffer))
+    (setq scaga-process (apply #'start-process "SCAGA" pbuffer args))))
 
 (defun scaga-insert-excerpt (file around-line)
   (when nil
@@ -248,7 +248,7 @@
       (set (make-local-variable 'scaga-calls) (list (concat scaga-rules-dir "/calls.scaga")))
       (set (make-local-variable 'scaga-badrules) (list (concat scaga-rules-dir "/badrules.scaga")))
       (set (make-local-variable 'scaga-call) (list (concat scaga-rules-dir "/call.scaga")))
-      (set (make-local-variable 'scaga-rules-buffer) (find-file-noselect scaga-rules))
+      (set (make-local-variable 'scaga-rules-buffer) (find-file-noselect (car scaga-rules)))
       (push "perl" args)
       (push scaga-path args)
       (push (concat "--executable=" scaga-exec) args)
