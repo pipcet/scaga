@@ -10,6 +10,7 @@ my @rules_files = ();
 my @calls_files = ();
 my @badrules_files = ();
 my $do_detect_cycles = 1;
+my $do_wait_for_next = 0;
 my $last = 4;
 my $loop_rules = 1;
 my $verbose = 1;
@@ -19,7 +20,8 @@ GetOptions("last=i" => \$last,
            "badrules=s" => \@badrules_files,
            "calls=s" => \@calls_files,
            "loop-rules=i" => \$loop_rules,
-           "detect-cycles=i" => \$do_detect_cycles);
+           "detect-cycles=i" => \$do_detect_cycles,
+           "wait-for-next=i" => \$do_wait_for_next);
 
 sub read_calls {
     my ($file) = @_;
@@ -222,7 +224,6 @@ EOF
 }
 
  rules_loop:
- retry:
 while ($loop_rules--) {
     warn "reading rules..." if $verbose;
     my %usecount;
@@ -234,6 +235,7 @@ while ($loop_rules--) {
     }
     my $iteration = 0;
     my $notreallydone = 1;
+ retry:
     while($notreallydone) {
         $notreallydone = 0;
 
@@ -311,7 +313,16 @@ while ($loop_rules--) {
 
                 my $bres = path_expansions($path, $badrules);
                 if (@$bres != 1) {
-                    warn "bad path " . $path->repr;
+                    warn $path->repr;
+                    if ($do_wait_for_next) {
+                        my $command = <STDIN>;
+                        chomp $command;
+
+                        next if $command eq "--next";
+                        next retry if $command eq "--next=retry";
+                        next rules_loop if $command eq "--next=rules-loop";
+                        die;
+                    }
                     next;
                 }
 
