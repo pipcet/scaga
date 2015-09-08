@@ -44,8 +44,10 @@ for my $call (@$calls) {
     $call->{callee} =~ s/\* \*/\*\*/msg;
     $call->{callee} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
 
+    $call->{component} =~ s/.*(\.|->)//msg;
     $call->{component} = "component:" . $call->{component} if defined $call->{component};
     $call->{intype} = "intype:" . $call->{intype} if defined $call->{intype};
+    $call->{flc} = "FLC:" . $call->{file} . ":" . $call->{line} . ":" . $call->{col};
     my @comp0;
     push @comp0, $call->{caller_type};
     push @comp0, $call->{component} if defined $call->{component};
@@ -65,16 +67,33 @@ for my $call (@$calls) {
     push @comp3, $call->{component} if defined $call->{component};
     push @comp3, $call->{intype} if defined $call->{intype};
 
-    next if ($call->{type} eq 'symbol' and
-             ($call->{inexpr} ne $call->{callee_type}));
+    if ($call->{type} eq 'symbol') {
+        next if $call->{inexpr} ne $call->{callee_type};
+
+        my @compa;
+        push @compa, $call->{caller_type};
+        push @compa, $call->{component};
+
+        my @compb;
+        push @compb, $call->{callee};
+        push @compb, $call->{callee_id};
+
+        print join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
+        pop @compa;
+        print join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
+        next;
+    }
 
     #next if ($call->{caller} eq $call->{callee}) and !defined($call->{component}); # XXX distinguish actual recursive
                                 # calls from type-only fake calls.
 
-    if (defined($call->{component}) and $call->{caller} eq $call->{callee}) {
+    if ($call->{type} ne 'fake' and
+        defined($call->{component}) and $call->{caller} eq $call->{callee}) {
         print join(" = ", @comp0) . " > " . join(" = ", @comp1) . "\n";
     }
-    print join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
+    if ($call->{type} ne 'fake') {
+        print join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
+    }
     print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
     print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
 }
