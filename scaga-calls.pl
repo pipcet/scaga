@@ -84,6 +84,9 @@ sub runcmd {
 
     pump_nb();
 
+    chomp $cmd;
+    $cmd .= "\n" if $cmd ne "";
+
     return $cache->{$cmd} = sub { while (!defined($ret)) { pump(); }; return $ret; };
 }
 
