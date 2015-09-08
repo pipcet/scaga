@@ -2,7 +2,6 @@
 use Carp::Always;
 use IPC::Run qw/run new_chunker timeout start/;
 use File::Slurp qw/slurp read_file/;
-use strict;
 
 my $calls;
 eval("\$calls = " . read_file($ARGV[0]));
@@ -36,23 +35,46 @@ for my $call (@$calls) {
     $call->{codeline} =~ s/ >> />>/g;
     $call->{codeline} =~ s/ = /=/g;
     $call->{codeline} =~ s/\n/ /msg;
+
     $call->{caller} =~ s/\* \(\*\)/\*\(\*\)/msg;
-    $call->{callee} =~ s/\* \(\*\)/\*\(\*\)/msg;
     $call->{caller} =~ s/\* \*/\*\*/msg;
-    $call->{callee} =~ s/\* \*/\*\*/msg;
-    $call->{callee} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
     $call->{caller} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
 
-    $call->{component} = defined($call->{component}) ? (" = component:" . $call->{component}) : "";
-    $call->{intype} = (defined($call->{intype}) and $call->{intype} ne "") ? (" = intype:" . $call->{intype}) : "";
+    $call->{callee} =~ s/\* \(\*\)/\*\(\*\)/msg;
+    $call->{callee} =~ s/\* \*/\*\*/msg;
+    $call->{callee} =~ s/(long long|long|short|char) ((un)?signed)( int)?/$2 . " " . $1/mesg;
 
-    next if ($call->{caller} eq $call->{callee}) and !defined($call->{component}); # XXX distinguish actual recursive
+    $call->{component} = "component:" . $call->{component} if defined $call->{component};
+    $call->{intype} = "intype:" . $call->{intype} if defined $call->{intype};
+    my @comp0;
+    push @comp0, $call->{caller_type};
+    push @comp0, $call->{component} if defined $call->{component};
+
+    my @comp1;
+    push @comp1, $call->{callee_type};
+
+    my @comp2;
+    push @comp2, $call->{caller};
+    push @comp2, $call->{flc} if defined $call->{flc};
+    push @comp2, "'" . $call->{codeline} . "'" if defined $call->{codeline};
+    push @comp2, $call->{caller_id};
+
+    my @comp3;
+    push @comp3, $call->{callee};
+    push @comp3, $call->{callee_id};
+    push @comp3, $call->{component} if defined $call->{component};
+    push @comp3, $call->{intype} if defined $call->{intype};
+
+    next if ($call->{type} eq 'symbol' and
+             ($call->{inexpr} ne $call->{callee_type}));
+
+    #next if ($call->{caller} eq $call->{callee}) and !defined($call->{component}); # XXX distinguish actual recursive
                                 # calls from type-only fake calls.
 
     if (defined($call->{component}) and $call->{caller} eq $call->{callee}) {
-        print $call->{caller_type} . $call->{component} . " > " . $call->{caller} . "\n";
+        print join(" = ", @comp0) . " > " . join(" = ", @comp1) . "\n";
     }
-    print $caller." = "."FLC:".$file.":".$line.":".$col." = \'".$codeline."\' = ".$caller_id." > ".$callee." = ".$callee_id.$component.$intype ."\n";
-    print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $caller_type eq $caller or $caller_type eq "" or $caller eq "";
-    print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $callee_type eq $callee or $callee_type eq "" or $callee eq "";
+    print join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
+    print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
+    print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
 }

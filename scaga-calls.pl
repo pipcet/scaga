@@ -178,9 +178,11 @@ my $pwd;
 chomp($pwd = `/bin/pwd`);
 
 sub register_call {
-    my ($caller, $callee, $file, $line, $col, $component, $inexpr) = @_;
+    my ($caller, $callee, $file, $line, $col, $component, $inexpr, $type) = @_;
 
-    push @calls, { caller => $caller, callee => $callee, file => $file, line => $line, col => $col };
+    warn (scalar @calls) . " calls";
+
+    push @calls, { caller => $caller, callee => $callee, file => $file, line => $line, col => $col, type => $type };
 
     my $call = $calls[$#calls];
     my $rip = file_line_col_to_rip($file, $line, $col);
@@ -207,13 +209,13 @@ sub register_call {
 sub register_function {
     my ($function, $file, $line, $col, $component) = @_;
 
-    return register_call ($function, $function, $file, $line, $col, $component);
+    return register_call ($function, $function, $file, $line, $col, $component, undef, 'fake');
 }
 
 sub register_suggested_type {
-    my ($function, $file, $line, $col, $component, $inexpr) = @_;
+    my ($function, $file, $line, $col, $component, $inexpr, $type) = @_;
 
-    return register_call ($function, $function, $file, $line, $col, $component, $inexpr);
+    return register_call ($function, $function, $file, $line, $col, $component, $inexpr, $type);
 }
 
 if ($do_symbols) {
@@ -251,12 +253,13 @@ if ($do_symbols) {
                 push @symbols, "$symbol\.$1";
                 $symbols{"$symbol\.$1"} = p("main", "$symbol\.$1");
                 push @{$symbol_components{$symbol}}, $1;
+                push @{$symbol_components{$symbol.".".$1}}, $1;
                 $done = 0;
             }
             if ($output =~ s/0x[0-9a-f]+ \<(.*?)\>$//ms) {
                 my ($function) = ($1);
                 for my $component (@{$symbol_components{$symbol}}) {
-                    register_suggested_type($function, "...", 0, 0, $component, $symbol);
+                    register_suggested_type($function, "...", 0, 0, $component, $symbol, "symbol");
                 }
             }
 
@@ -305,7 +308,7 @@ while (<>) {
         my ($file, $line, $col, $dummy1, $expr, $op, $component, $dummy2, $value) =
             ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
-        register_suggested_type($value, $file, $line, $col, $component);
+        register_suggested_type($value, $file, $line, $col, $component, undef, "assign");
     }
     if (/^ *\[(.*?):(.*?):(.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
         my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
@@ -321,7 +324,7 @@ while (<>) {
 
         # print $caller . " calls " . $callee . "\n";
         # $callers{$callee}{$caller} = 1;
-        register_call($caller, $callee, $file, $line, $col, $comp, $inexpr);
+        register_call($caller, $callee, $file, $line, $col, $comp, $inexpr, 'real');
     }
     if (/>>\[(.*?):([0-9]*?):([0-9*])\] gimple_bind/) {
         my ($file, $line, $col) = ($1, $2, $3);
@@ -432,6 +435,7 @@ while ($notdone) {
 
 use Data::Dumper;
 
+warn (scalar @calls) . " calls";
 print Dumper(\@calls);
 
 exit 0;
