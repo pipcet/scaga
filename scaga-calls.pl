@@ -180,7 +180,7 @@ chomp($pwd = `/bin/pwd`);
 sub register_call {
     my ($caller, $callee, $file, $line, $col, $component, $inexpr) = @_;
 
-    push @calls, [ $caller, $callee, $file, $line, $col ];
+    push @calls, { caller => $caller, callee => $callee, file => $file, line => $line, col => $col };
 
     my $call = $calls[$#calls];
     my $rip = file_line_col_to_rip($file, $line, $col);
@@ -191,13 +191,13 @@ sub register_call {
     my $callee_id = p($rip, $callee);
     my $codeline;
 
-    $call->[5] = $caller_type;
-    $call->[6] = $callee_type;
-    $call->[7] = $codeline = grab_line($file, $line);
-    $call->[8] = $caller_id;
-    $call->[9] = $callee_id;
-    $call->[10] = $component;
-    $call->[11] = data_type($rip, $inexpr) if $inexpr ne "";
+    $call->{caller_type} = $caller_type;
+    $call->{callee_type} = $callee_type;
+    $call->{codeline} = $codeline = grab_line($file, $line);
+    $call->{caller_id} = $caller_id;
+    $call->{callee_id} = $callee_id;
+    $call->{component} = $component;
+    $call->{inexpr} = data_type($rip, $inexpr) if $inexpr ne "";
 
 #    print "$caller_type $caller = $caller_id calls $callee_type $callee = $callee_id at $file:$line: $codeline\n";
 
@@ -415,19 +415,14 @@ my $notdone = 1;
 while ($notdone) {
     $notdone = 0;
     for my $call (@calls) {
-        for my $i (0 .. $#$call) {
-            if (ref $call->[$i]) {
-                $call->[$i] = $call->[$i]->();
+        for my $key (keys %$call) {
+            if (ref $call->{$key}) {
+                $call->{$key} = $call->{$key}->();
                 $notdone = 1;
             }
         }
     }
     sync;
-}
-
-
-for my $call (@calls) {
-    $call->[7] => s/.*\$[0-9]*//g;
 }
 
 use Data::Dumper;
