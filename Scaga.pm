@@ -61,6 +61,21 @@ sub new {
 
 package Scaga::Component::RegExp;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{pattern}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
+
 
 sub repr {
     my ($self) = @_;
@@ -78,6 +93,21 @@ sub new {
 
 package Scaga::Component::Identifier;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{identifier}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
+
 
 sub identifiers {
     my ($self) = @_;
@@ -99,6 +129,21 @@ sub new {
 
 package Scaga::Component::Codeline;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{codeline}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
+
 
 sub repr {
     my ($self) = @_;
@@ -116,6 +161,39 @@ sub new {
 
 package Scaga::Component::FLC;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub grab_context {
+    my ($file, $line, $column) = @_;
+
+    my $fh;
+    open $fh, "</home/pip/git/emacs/src/$file" or return "<pre>cannot open $file</pre>";
+
+    my @lines = <$fh>;
+
+    return "<pre>" .
+        HTML::Entities::encode_entities(join("", @lines[$line-21..$line-2])) .
+        "<a href=\"file:///home/pip/git/emacs/src/$file:$line\">" .
+        HTML::Entities::encode_entities($lines[$line-1]) .
+        "</a>" .
+        HTML::Entities::encode_entities(join("", @lines[$line..$line+19])) . "</pre>\n";
+}
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{flc}) {
+        #        $ret .= HTML::Entities::encode_entities($value);
+        $self->{flc} =~ /^(.*?):(.*?):(.*?)$/;
+        $ret .= grab_context($1, $2, $3);
+    }
+
+    return $ret;
+}
+
 
 sub repr {
     my ($self) = @_;
@@ -131,6 +209,21 @@ sub new {
 
 package Scaga::Component::Value;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{value}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
+
 
 sub repr {
     my ($self) = @_;
@@ -146,6 +239,21 @@ sub new {
 
 package Scaga::Component::Intype;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{intype}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
+
 
 sub repr {
     my ($self) = @_;
@@ -161,6 +269,20 @@ sub new {
 
 package Scaga::Component::Component;
 use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{component}) {
+        $ret .= HTML::Entities::encode_entities($value);
+    }
+
+    return $ret;
+}
 
 sub repr {
     my ($self) = @_;
@@ -175,6 +297,22 @@ sub new {
 }
 
 package Scaga::Pattern;
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $component (@{$self->{components}}) {
+        $ret .= "<p>\n";
+        $ret .= $component->html;
+        $ret .= "</p>\n";
+    }
+
+    return $ret;
+}
 
 # internal. modifies data.
 sub normalize {
@@ -392,6 +530,34 @@ sub new {
 }
 
 package Scaga::Path;
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+    my $n = $self->n;
+
+    my $ret = "";
+
+    $ret .= "<table>\n";
+    $ret .= "<tr style=\"width: 30em\">\n";
+    $ret .= "<td colspan=\"$n\">\n";
+    $ret .= "<pre>" . HTML::Entities::encode_entities($self->repr) . "</pre>\n";
+    $ret .= "</td>\n";
+    $ret .= "</tr>\n";
+    $ret .= "<tr>\n";
+
+    for my $i (0 .. $n-1) {
+        $ret .= "<td>\n";
+        $ret .= $self->slice($i, $i+1)->{ppaths}->[0]->{patterns}->[0]->html;
+        $ret .= "</td>\n";
+    }
+
+    $ret .= "</tr></table>\n";
+
+    return $ret;
+}
+
 
 %Scaga::Path::paths = ();
 
@@ -627,6 +793,22 @@ sub cmp {
 }
 
 package Scaga::Rule;
+use HTML::Entities;
+use Data::Dumper;
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    $ret .= "<table>\n";
+
+
+
+    $ret .= "</table>\n";
+
+    return $ret;
+}
 
 sub identifiers {
     my ($self) = @_;
@@ -635,13 +817,23 @@ sub identifiers {
 }
 
 use Data::Dumper;
+use HTML::Entities;
 
 sub substitute {
     my ($self, $input) = @_;
     my @res = ();
 
     my $m;
-    if ($m = $input->endmatch($self->{in})) {
+    if ($m = $input->submatch($self->{in})) {
+        if ($self->{file} eq "emacs-rules-tofix.scaga") {
+        my $fh;
+        open $fh, ">>match.html";
+        print $fh "<pre>" . HTML::Entities::encode_entities($self->{file} . ":" . $self->{line}) . "</pre>\n";
+        print $fh "<pre>" . HTML::Entities::encode_entities($self->{in}->repr) . "</pre>\n";
+        print $fh "<pre>" . HTML::Entities::encode_entities($input->repr) . "</pre>\n";
+        print $fh $input->slice($m->[0], $m->[1])->html;
+        close $fh;
+        }
         $self->{usecount}++;
         if ($self->{out}) {
             my $output = $input->slice(0, $m->[0])
