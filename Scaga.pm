@@ -15,7 +15,7 @@ sub repr {
 }
 
 sub match {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     if (defined($self->{pattern}) and defined($other->{pattern})) {
         return $self->{pattern} eq $other->{pattern};
@@ -36,6 +36,11 @@ sub match {
 
         if (defined($other->{$lkey}) and
             $other->{$lkey} ne $self->{$lkey}) {
+            return 0;
+        }
+
+        if ($param && $param->{lstrict}->{$lkey} &&
+            !defined($other->{$lkey})) {
             return 0;
         }
     }
@@ -368,13 +373,13 @@ sub identifiers {
 use Data::Dumper;
 
 sub match {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     die $self->repr unless @{$self->{components}} and @{$other->{components}};
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
-            if (!$lcomp->match($rcomp)) {
+            if (!$lcomp->match($rcomp, $param)) {
                 return 0;
             }
         }
@@ -497,7 +502,7 @@ sub slice {
 }
 
 sub match {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     die unless $other->isa('Scaga::PPath');
 
@@ -508,7 +513,7 @@ sub match {
         my $n = $ln;
 
         for my $i (0..$n-1) {
-            if (!$self->{patterns}->[$i]->match($other->{patterns}->[$i])) {
+            if (!$self->{patterns}->[$i]->match($other->{patterns}->[$i], $param)) {
                 return undef;
             }
         }
@@ -661,7 +666,7 @@ sub increasing_sequences {
 }
 
 sub submatch {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     die unless $other->isa('Scaga::Path');
 
@@ -675,7 +680,7 @@ sub submatch {
 
             my $subpath = bless { ppaths => [$ppath] }, 'Scaga::Path';
 
-            if ($subpath->match($other)) {
+            if ($subpath->match($other, $param)) {
                 return [$i, $j];
             }
         }
@@ -719,7 +724,7 @@ sub concat {
 use Data::Dumper;
 
 sub endmatch {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     die unless $other->isa('Scaga::Path');
 
@@ -730,7 +735,7 @@ sub endmatch {
     for my $i (reverse (0 .. $n-1)) {
         my $subpath = $self->slice($i, $n);
 
-        if ($subpath->match($other)) {
+        if ($subpath->match($other, $param)) {
             return [$i, $n];
         }
     }
@@ -739,14 +744,14 @@ sub endmatch {
 }
 
 sub match {
-    my ($self, $other) = @_;
+    my ($self, $other, $param) = @_;
 
     die unless $other->isa('Scaga::Path');
 
     die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
 
     if (@{$other->{ppaths}} == 1) {
-        my $m = $self->{ppaths}->[0]->match($other->{ppaths}->[0]);
+        my $m = $self->{ppaths}->[0]->match($other->{ppaths}->[0], $param);
 
         return $m if $m;
     }
@@ -758,8 +763,8 @@ sub match {
                 my $lslice = $self->{ppaths}->[0]->slice(0, $i);
                 my $rslice = $self->{ppaths}->[0]->slice($j, $n);
 
-                if ($lslice->match($other->{ppaths}->[0]) &&
-                    $rslice->match($other->{ppaths}->[1])) {
+                if ($lslice->match($other->{ppaths}->[0], $param) &&
+                    $rslice->match($other->{ppaths}->[1], $param)) {
                     return [$i, $j];
                 }
             }
@@ -820,11 +825,11 @@ use Data::Dumper;
 use HTML::Entities;
 
 sub substitute {
-    my ($self, $input) = @_;
+    my ($self, $input, $param) = @_;
     my @res = ();
 
     my $m;
-    if ($m = $input->submatch($self->{in})) {
+    if ($m = $input->submatch($self->{in}, $param)) {
         if ($self->{file} eq "emacs-rules-tofix.scaga") {
         my $fh;
         open $fh, ">>match.html";
