@@ -48,6 +48,7 @@ for my $call (@$calls) {
     $call->{component} = "component:" . $call->{component} if defined $call->{component};
     $call->{intype} = "intype:" . $call->{intype} if defined $call->{intype};
     $call->{flc} = "FLC:" . $call->{file} . ":" . $call->{line} . ":" . $call->{col};
+    $call->{home} = "home:" . $call->{file} . ":" . $call->{line} . ":" . $call->{col};
     my @comp0;
     push @comp0, $call->{caller_type};
     push @comp0, $call->{component} if defined $call->{component};
@@ -96,4 +97,5 @@ for my $call (@$calls) {
     }
     print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
     print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
+    print $call->{callee} . " = " . $call->{home} . "\n" if $call->{type} eq 'fake';
 }

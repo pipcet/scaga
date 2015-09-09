@@ -33,6 +33,7 @@ sub match {
     for my $lkey (keys %$self) {
         next if $lkey eq "codeline";
         next if $lkey eq "flc";
+        next if $lkey eq "home";
 
         if (defined($other->{$lkey}) and
             $other->{$lkey} ne $self->{$lkey}) {
@@ -53,6 +54,8 @@ sub new {
 
     if ($string =~ /^FLC:(.*?)$/) {
         return Scaga::Component::FLC->new($1);
+    } elsif ($string =~ /^home:(.*?)$/) {
+        return Scaga::Component::Home->new($1);
     } elsif ($string =~ /^(\/[^\/]*\/)$/) {
         return Scaga::Component::RegExp->new($1);
     } elsif ($string =~ /^\'([^']*)\'$/) {
@@ -210,6 +213,54 @@ sub new {
     my ($class, $string, $output) = @_;
 
     return bless { flc => $string }, $class;
+}
+
+package Scaga::Component::Home;
+use parent -norequire, 'Scaga::Component';
+use HTML::Entities;
+use Data::Dumper;
+
+sub grab_context {
+    my ($file, $line, $column) = @_;
+
+    my $fh;
+    open $fh, "</home/pip/git/emacs/src/$file" or return "<pre>cannot open $file</pre>";
+
+    my @lines = <$fh>;
+
+    return "<pre>" .
+        HTML::Entities::encode_entities(join("", @lines[$line-21..$line-2])) .
+        "<a href=\"file:///home/pip/git/emacs/src/$file:$line\">" .
+        HTML::Entities::encode_entities($lines[$line-1]) .
+        "</a>" .
+        HTML::Entities::encode_entities(join("", @lines[$line..$line+19])) . "</pre>\n";
+}
+
+sub html {
+    my ($self) = @_;
+
+    my $ret = "";
+
+    for my $value ($self->{home}) {
+        #        $ret .= HTML::Entities::encode_entities($value);
+        $self->{home} =~ /^(.*?):(.*?):(.*?)$/;
+        $ret .= grab_context($1, $2, $3);
+    }
+
+    return $ret;
+}
+
+
+sub repr {
+    my ($self) = @_;
+
+    return "home:" . $self->{home};
+}
+
+sub new {
+    my ($class, $string, $output) = @_;
+
+    return bless { home => $string }, $class;
 }
 
 package Scaga::Component::Value;
@@ -411,6 +462,8 @@ sub new {
     while ($string) {
         if ($string =~ s/^FLC:(.*?:[0-9]*:[0-9]*)//ms) {
             push @components, Scaga::Component::FLC->new($1);
+        } elsif ($string =~ s/^home:(.*?:[0-9]*:[0-9]*)//ms) {
+            push @components, Scaga::Component::Home->new($1);
         } elsif ($string =~ s/^(component:[^ =]*)//ms) {
             push @components, Scaga::Component::Component->new($1);
         } elsif ($string =~ s/^(intype:[^=]*[^ =])//ms) {
