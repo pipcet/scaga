@@ -922,21 +922,30 @@ sub repr {
     my ($self) = @_;
 
     if ($self->{out}) {
-        return $self->{in}->repr . " => " . $self->{out}->repr;
+        return $self->{kind} . " := " . $self->{in}->repr . " => " . $self->{out}->repr;
     } else {
-        return $self->{in}->repr;
+        return $self->{kind} . " := " . $self->{in}->repr;
     }
 }
 
 sub new {
     my ($class, $string) = @_;
+    my $self = bless { }, $class;
+
+    if ($string =~ s/^(.*?) := //) {
+        my $kind = $1;
+
+        $self->{kind} = $kind;
+    } else {
+        $self->{kind} = "drop";
+    }
 
     if ($string =~ /^(.*) => (.*)$/) {
         my ($in, $out) = ($1, $2);
 
-        my $self = bless { in => Scaga::Path->new($in),
-                           out => Scaga::Path->new($out),
-                           usecount => 0, }, $class;
+        $self->{in} = Scaga::Path->new($in);
+        $self->{out} = Scaga::Path->new($out);
+        $self->{usecount} = 0;
 
         return $self;
     }
@@ -944,7 +953,8 @@ sub new {
     if ($string =~ /^(.*?)( =>)?$/) {
         my ($in, $out) = ($1, '');
 
-        my $self = bless { in => Scaga::Path->new($in), usecount => 0 }, $class;
+        $self->{in} = Scaga::Path->new($in);
+        $self->{usecount} = 0;
 
         return $self;
     }
