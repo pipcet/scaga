@@ -270,7 +270,7 @@ sub critical_lines {
         for my $rule (@$rules) {
             my $path = $rule->{out};
 
-            next unless $path->submatch($path0);
+            next unless $path0->submatch($path);
 
             next unless $path->n == 2;
             my $identifier = $path->last_identifier;
