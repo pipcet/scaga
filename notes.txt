@@ -9,3 +9,16 @@ while sleep 1; do for a in /home/pip/git/emacs/src/*.c.pl; do perl ~/git/scaga/s
 echo "process_pending_signals" | perl -d:NYTProf ./scaga-extend.pl --loop-rules=-1 --calls=emacs-calls.scaga --calls=emacs-glib-callbacks.scaga --rules=rules.scaga > out.scaga && wc -l out.scaga
 for last in $(seq 7 100); do echo "process_pending_signals" | time perl ./scaga-extend.pl --loop-rules=1 --calls=emacs-calls.scaga --calls=emacs-glib-callbacks.scaga --rules=rules.scaga --badrules=badrules.scaga --last=$last > out.scaga && wc -l out.scaga; done
 for last in $(seq 1 100); do echo "process_pending_signals" | time perl ./scaga-extend.pl --loop-rules=1 --calls=emacs-calls.scaga --calls=emacs-glib-callbacks.scaga --rules=rules.scaga --last=$last > out.scaga && wc -l out.scaga; done
+
+
+-fipa-cp -fipa-pta -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans
+
+/usr/lib/gcc/x86_64-linux-gnu/5.2.1/lto1 -S -O3 -flto -o test12.s -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans test1.o test2.o
+
+ gcc -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -fltrans -O3 -c test1.c
+
+gcc -I.. -I. -I../lib $(pkg-config --cflags gtk+-3.0) -fdump-tree-gimple-vops-verbose-raw-lineno -S ./frame.c
+
+gcc -I.. -I. -I../lib $(pkg-config --cflags gtk+-3.0) -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -fltrans -O3 -c gtkutil-tmp.c
+
+/usr/lib/gcc/x86_64-linux-gnu/5.2.1/lto1 -S -O3 -flto -o test12.s -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans frame-tmp.o gtkutil-tmp.o
