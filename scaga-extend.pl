@@ -223,6 +223,70 @@ EOF
 use File::Temp;
 use File::Copy;
 
+sub inrange {
+    my ($line, $flc) = @_;
+
+    $flc =~ /^(.*?):(.*?):(.*?)$/;
+    my ($fc, $lc, $cc) = ($1, $2, $3);
+
+    my ($testa, $testb, $testc);
+    if ($fc eq $line->[0]->[0]) {
+        $testc = 1;
+        if ($lc >= $line->[0]->[1]) {
+            $testa = 1;
+        } else {
+            $testa = 0;
+        }
+    } else {
+        $testa = 1;
+    }
+
+    if ($line->[1]) {
+        if ($fc eq $line->[1]->[0]) {
+            $testc = 1;
+            if ($lc < $line->[1]->[1]) {
+                $testb = 1;
+            } else {
+                $testb = 0;
+            }
+        } else {
+            $testb = 1;
+        }
+    } else {
+        $testb = 1;
+    }
+
+    return $testa && $testb && $testc;
+}
+
+# return the "critical" lines at which the calls making up our call
+# chain are made.
+sub critical_lines {
+    my ($path0, $scaga, $scaga1) = @_;
+    my @ret;
+
+    for my $rules (values %{$scaga1->{call}}) {
+        for my $rule (@$rules) {
+            my $path = $rule->{out};
+
+            next unless $path->submatch($path0);
+
+            next unless $path->n == 2;
+            my $identifier = $path->last_identifier;
+
+            my $type;
+
+            for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
+                if (exists $component->{flc}) {
+                    push @ret, $component->{flc};
+                }
+            }
+        }
+    }
+
+    return @ret;
+}
+
 # perform an experimental lto-based link to see whether $inpath is a
 # code path gcc generates code for if LTO is performed.
 
@@ -237,6 +301,10 @@ use File::Copy;
 
 sub lto_experiment {
     my ($inpath, $scaga, $scaga1) = @_;
+
+    return 1 if $inpath->n == 1;
+
+    my @critlines = critical_lines($inpath, $scaga, $scaga1);
 
     my %type;
 
@@ -298,18 +366,28 @@ sub lto_experiment {
 
     my @files = sort keys %files;
     my $dir = File::Temp->newdir(CLEANUP => 0);
+    my @newfiles;
 
     for my $file (@files) {
         my $newfile = $file;
+        my $ffile;
         $newfile =~ s/.*\///;
-        copy($file, $dir . "/" . $newfile) or die "$file / $newfile";
+        if ($file !~ /^\//) {
+            for my $dir (@source_directories) {
+                if (-e "$dir/$file") {
+                    $ffile = "$dir/$file";
+                    last;
+                }
+            }
+        }
+        copy($ffile, $dir . "/" . $newfile) or die "$file / $newfile";
         my $fh;
         open $fh, ">>$dir/$newfile" or die "$file / $newfile";
 
         for my $identifier (sort keys %{$files{$file}}) {
             my $attr = "always_inline";
-            $attr = "noinline" if $identifier eq $first_identifier or
-                $identifier eq $last_identifier;
+            $attr = "noinline" if $identifier eq $first_identifier
+                or $identifier eq $last_identifier;
             my $proto = $type{$identifier};
             $proto =~ s/\(\*\)/$identifier/;
             print $fh $proto . " __attribute__(($attr));\n";
@@ -321,9 +399,10 @@ sub lto_experiment {
         }
 
         close $fh;
+        push @newfiles, $newfile;
     }
 
-    if (system("$lto -o test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @files))) {
+    if (system("$lto -o test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles))) {
         warn "$lto failed";
         return 1;
     }
@@ -336,19 +415,44 @@ sub lto_experiment {
     }
 
     my %called_identifiers;
+    my $function_returns = 0;
     my $found = 0;
+    my @files;
     while (<$fh>) {
+        if (/\.file[ \t]+(\d*?)[ \t]+\"(.*?)\"$/) {
+            $files[$1] = $2;
+        }
         if (/\.type[ \t]+(.*?),[ \t]*\@function/ and $1 eq $first_identifier) {
+            my ($file, $lineno, $column);
+            my @open_identifiers;
             while (<$fh>) {
                 last if (/\.size[ \t]+(.*?),/ and $1 eq $first_identifier);
 
+                if (/\.loc[ \t]+(.*?) (.*?) (.*?)$/) {
+                    ($file, $lineno, $column) = ($files[$1], $2, $3);
+
+                    for my $identifier (@open_identifiers) {
+                        my $lines = $called_identifiers{$identifier};
+                        my $line = $lines->[$#$lines];
+                        $line->[1] = [$file, $lineno, $column];
+                    }
+                    @open_identifiers = ();
+                }
                 if (/callq?[ \t]+(.*?)$/) {
-                    $called_identifiers{$1} = 1;
+                    push @{$called_identifiers{$1}}, [ [$file, $lineno, $column] ];
+                    push @open_identifiers, $1;
+                }
+                if (/^[ \t]*ret/) {
+                    $function_returns = 1;
                 }
             }
             $found = 1;
         }
     }
+    if (!$function_returns) {
+        warn "function doesn't return!";
+    }
+
     if (!$found) {
         warn "couldn't find $first_identifier";
         return 1;
@@ -357,15 +461,50 @@ sub lto_experiment {
     close $fh;
 
     for my $called_identifier (sort keys %called_identifiers) {
-        warn "function calls $called_identifier\n";
-        return 1 if $called_identifier =~ /^\*/; # indirect call
+        for my $line (@{$called_identifiers{$called_identifier}}) {
+            my ($f0, $l0, $c0) = @{$line->[0]};
+            warn "function calls $called_identifier after $f0:$l0:$c0\n";
+            if ($line->[1]) {
+                my ($f1, $l1, $c1) = @{$line->[1]};
+                warn "function calls $called_identifier between $f0:$l0:$c0 and $f1:$l1:$c1\n";
+            }
+            for my $cline (@critlines) {
+                warn "critical line " . $cline;
+                if (inrange($line, $cline)) {
+                    warn "in range! oh no!";
+                }
+            }
+        }
+        # return 1 if $called_identifier =~ /^\*/; # indirect call
     }
 
     for my $called_identifier (sort keys %called_identifiers) {
         return 1 if grep { $_ eq $called_identifier } @identifiers;
+        $called_identifier =~ s/\..*//;
+        return 1 if grep { $_ eq $called_identifier } @identifiers;
     }
 
     return 0;
+}
+
+sub baddie {
+    my ($path, $scaga, $scaga1) = @_;
+
+    my $n = $path->n;
+
+    for my $i (0 .. $n-1) {
+        for my $j ($i+1 .. $i+4) {
+            next if $j >= $n;
+            my $subpath = $path->slice($i, $j);
+            my $ret = lto_experiment($subpath, $scaga, $scaga1);
+
+            if ($ret) {
+                warn "# lto failed: " . $subpath->repr;
+            } else {
+                warn "lto:impossible := " . $subpath->repr;
+            }
+        }
+    }
 }
 
  rules_loop:
@@ -488,6 +627,7 @@ while ($loop_rules--) {
                 my $param = { baddie => 1 };
                 my $bres = path_expansions($path, $scaga, $param);
                 if (@$bres != 1) {
+                    baddie($path, $scaga, $scaga1);
                     warn $path->repr;
                     while ($do_wait_for_next) {
                         my $command = <STDIN>;
