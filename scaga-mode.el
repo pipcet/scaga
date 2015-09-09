@@ -82,6 +82,7 @@
       (put-text-property m9 m1 'scaga-excerpt (list (cons m0 m1) type)))))
 
 (defun scaga-plus-command ()
+  "Display more context for defun at point."
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
          (excerpt (get-text-property (point) 'scaga-excerpt))
@@ -91,6 +92,7 @@
       (scaga-create-excerpt lines))))
 
 (defun scaga-minus-command ()
+  "Display less context for defun at point."
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
          (excerpt (get-text-property (point) 'scaga-excerpt))
@@ -100,6 +102,7 @@
       (scaga-create-excerpt lines))))
 
 (defun scaga-f-command ()
+  "Display entire defun at point."
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
          (excerpt (get-text-property (point) 'scaga-excerpt))
@@ -109,14 +112,17 @@
       (scaga-create-excerpt 'defun))))
 
 (defun scaga-l-command ()
+  "Rerun current iteration."
   (interactive)
   (setq scaga-next "--next=retry"))
 
 (defun scaga-L-command ()
+  "Rerun loop from iteration 1."
   (interactive)
   (setq scaga-next "--next=rules-loop"))
 
 (defun scaga-tab-command ()
+  "Show source code for defun at point or hide it."
   (interactive)
   (let ((flc (get-text-property (point) 'scaga-flc))
         (excerpt (get-text-property (point) 'scaga-excerpt)))
@@ -126,6 +132,7 @@
         (scaga-create-excerpt 5)))))
 
 (defun scaga-ret-command ()
+  "Visit the defun at point."
   (interactive)
   (let ((flc (get-text-property (point) 'scaga-flc))
         (excerpt (get-text-property (point) 'scaga-excerpt)))
@@ -137,6 +144,7 @@
           (goto-line lineno))))))
 
 (defun scaga-region-to-path (beg end)
+  "Convert the current region to a path."
   (interactive "r")
   (let ((next beg)
         patterns patterns2)
@@ -150,6 +158,7 @@
     (message (mapconcat #'identity patterns2 " > "))))
 
 (defun scaga-update (buffer)
+  "Automated update function run when there is new SCAGA process output."
   (with-current-buffer
       (with-current-buffer buffer (process-buffer scaga-process))
     (goto-char 1)
@@ -160,61 +169,68 @@
                (patterns (split-string line " > "))
                after-line new-components lines
                filename lineno colno)
-          (dolist (pattern patterns)
-            (setq new-components nil)
-            (dolist (component (split-string pattern " = "))
-              (cond
-               ((string-match "^FLC:\\(.*?\\):\\(.*?\\):\\(.*?\\)$" component)
-                (setq filename (concat "/home/pip/git/emacs/src/" (match-string 1 component)))
-                (setq lineno (string-to-number (match-string 2 component)))
-                (setq colno (string-to-number (match-string 3 component)))
-                (push `(lambda ()
-                         (scaga-insert-excerpt (concat "/home/pip/git/emacs/src/" ,(match-string 1 component))
-                                               (string-to-number ,(match-string 2 component))))
-                      after-line))
-               ((string-match "^component:" component)
-                (push component new-components))
-               ((string-match "^intype:" component)
-                t)
-               ((string-match "^/" component)
-                t)
-               ((string-match "^'" component)
-                t)
-               ((string-match "0x" component)
-                t)
-               (t
-                (push component new-components))))
-            (push (propertize
-                   (mapconcat #'identity (nreverse new-components) " = ")
-                   'scaga-pattern
-                   (mapconcat #'identity (nreverse new-components) " = ")
-                   'scaga-flc
-                   `(,filename ,lineno ,colno)
-                   'face
-                   `(:background "#ccccff"))
-                  lines)
-            (with-current-buffer scaga-buffer
-              (save-excursion
-                (goto-char (point-max))
-                (dolist (line lines)
-                  (insert line)
-                  (insert "\n"))
-                (setq lines nil)
-                (dolist (f after-line)
-                  (funcall f)))))
-          (when (> (length patterns) 1)
+          (if (= (length patterns) 1)
+              (with-current-buffer buffer
+                (save-excursion
+                  (goto-char (point-max))
+                  (insert (propertize line
+                                      'face `(:background "#888888")))
+                  (insert "\n")))
+            (dolist (pattern patterns)
+              (setq new-components nil)
+              (dolist (component (split-string pattern " = "))
+                (cond
+                 ((string-match "^FLC:\\(.*?\\):\\(.*?\\):\\(.*?\\)$" component)
+                  (setq filename (concat "/home/pip/git/emacs/src/" (match-string 1 component)))
+                  (setq lineno (string-to-number (match-string 2 component)))
+                  (setq colno (string-to-number (match-string 3 component)))
+                  (push `(lambda ()
+                           (scaga-insert-excerpt (concat "/home/pip/git/emacs/src/" ,(match-string 1 component))
+                                                 (string-to-number ,(match-string 2 component))))
+                        after-line))
+                 ((string-match "^component:" component)
+                  (push component new-components))
+                 ((string-match "^intype:" component)
+                  t)
+                 ((string-match "^/" component)
+                  t)
+                 ((string-match "^'" component)
+                  t)
+                 ((string-match "0x" component)
+                  t)
+                 (t
+                  (push component new-components))))
+              (push (propertize
+                     (mapconcat #'identity (nreverse new-components) " = ")
+                     'scaga-pattern
+                     (mapconcat #'identity (nreverse new-components) " = ")
+                     'scaga-flc
+                     `(,filename ,lineno ,colno)
+                     'face
+                     `(:background "#ccccff"))
+                    lines)
+              (with-current-buffer buffer
+                (save-excursion
+                  (goto-char (point-max))
+                  (dolist (line lines)
+                    (insert line)
+                    (insert "\n"))
+                  (setq lines nil)
+                  (dolist (f after-line)
+                    (funcall f)))))
             (when (process-live-p scaga-process)
               (process-send-string scaga-process (concat (or scaga-next "--next") "\n")))
-            (setq scaga-next nil))
-          (with-current-buffer scaga-buffer
-            (save-excursion
-              (goto-char (point-max))
-              (insert "\n")))
+            (setq scaga-next nil)
+            (with-current-buffer buffer
+              (save-excursion
+                (goto-char (point-max))
+                (insert "\n"))))
           (delete-region 1 (point)))))))
 
 (define-derived-mode scaga-mode special-mode "SCAGA"
   "SCAGA mode, see https://github.com/pipcet/scaga"
-  (set (make-local-variable 'scaga-timer) (run-with-timer 0 1 #'scaga-update (current-buffer))))
+  (set (make-local-variable 'scaga-timer) (run-with-timer 0 1 #'scaga-update (current-buffer)))
+  (setq buffer-read-only nil))
 
 (define-key scaga-mode-map (kbd "TAB") #'scaga-tab-command)
 (define-key scaga-mode-map (kbd "RET") #'scaga-ret-command)
@@ -235,15 +251,23 @@
     (delete-region (point-min) (point-max)))
   (apply #'scaga-start scaga-args))
 
+(defvar scaga-path nil "Path to SCAGA Perl program")
+(defvar scaga-exec nil "Path to executable being analyzed")
+(defvar scaga-source nil "Path to source code for analyzed program")
+(defvar scaga-rules-dir nil "Path to SCAGA rules files")
+
+(defvar scaga-args nil "arguments to run SCAGA with")
+
 (defun scaga ()
   (interactive)
   (let ((buffer (get-buffer-create "*SCAGA*"))
         args)
     (with-current-buffer buffer
-      (set (make-local-variable 'scaga-path) (read-file-name "path to scaga-extend.pl: "))
-      (set (make-local-variable 'scaga-exec) (read-file-name "path to executable: "))
-      (set (make-local-variable 'scaga-source) (read-directory-name "path to source code: "))
-      (set (make-local-variable 'scaga-rules-dir) (read-directory-name "path to rules.scaga, badrules.scaga, calls.scaga, and call.scaga: "))
+      (scaga-mode)
+      (set (make-local-variable 'scaga-path) (expand-file-name (read-file-name "path to scaga-extend.pl: ")))
+      (set (make-local-variable 'scaga-exec) (expand-file-name (read-file-name "path to executable: ")))
+      (set (make-local-variable 'scaga-source) (expand-file-name (read-directory-name "path to source code: ")))
+      (set (make-local-variable 'scaga-rules-dir) (expand-file-name (read-directory-name "path to rules.scaga, badrules.scaga, calls.scaga, and call.scaga: ")))
       (set (make-local-variable 'scaga-rules) (list (concat scaga-rules-dir "/rules.scaga")))
       (set (make-local-variable 'scaga-calls) (list (concat scaga-rules-dir "/calls.scaga")))
       (set (make-local-variable 'scaga-badrules) (list (concat scaga-rules-dir "/badrules.scaga")))
@@ -264,10 +288,8 @@
       (push "--wait-for-next=1" args)
       (push "--loop-rules=-1" args)
       (setq args (nreverse args))
-      (set (make-local-variable 'scaga-args) args)
-      (set (make-local-variable 'scaga-process) nil)
       (apply #'scaga-start args)
-      (scaga-mode))))
+      (set (make-local-variable 'scaga-args) args))))
 
 (provide 'scaga-mode)
 
