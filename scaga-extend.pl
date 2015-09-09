@@ -10,6 +10,7 @@ my @rules_files = ();
 my @calls_files = ();
 my @badrules_files = ();
 my @executable_files = ();
+my @source_directories = ();
 my $do_detect_cycles = 1;
 my $do_wait_for_next = 0;
 my $last = 4;
@@ -27,7 +28,8 @@ GetOptions("last=i" => \$last,
            "wait-for-next=i" => \$do_wait_for_next,
            "executable=s" => \@executable_files,
            "cflags=s" => \$cflags,
-           "lto-flags=s" => \$ltoflags);
+           "lto-flags=s" => \$ltoflags,
+           "source-directory=s" => \@source_directories);
 
 sub read_calls {
     my ($file) = @_;
@@ -346,15 +348,9 @@ sub lto_experiment {
         return 1 if grep { $_ eq $called_identifier } @identifiers;
     }
 
-    die "success!";
     return 0;
 }
 
-my $inpath = Scaga::Path->new('x_wm_set_size_hint > Fframe_parameter > Fassq');
-
-lto_experiment($inpath);
-
-exit 0;
  rules_loop:
 while ($loop_rules--) {
     warn "reading rules..." if $verbose;
