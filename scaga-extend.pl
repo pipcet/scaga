@@ -18,6 +18,7 @@ my $loop_rules = 1;
 my $verbose = 1;
 my $cc;
 my $lto;
+my $gsequence = 0;
 
 GetOptions("last=i" => \$last,
            "rules=s" => \@rules_files,
@@ -690,6 +691,7 @@ while ($loop_rules--) {
                 if (@$bres != 1) {
                     baddie($path, $scaga, $scaga1);
                     warn $path->repr;
+                    warn "!!!sequence: " . $gsequence++;
                     while ($do_wait_for_next) {
                         my $command = <STDIN>;
                         chomp $command;
