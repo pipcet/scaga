@@ -415,6 +415,7 @@ sub lto_experiment {
     }
 
     my %called_identifiers;
+    my %called_and_returning_identifiers;
     my $function_returns = 0;
     my $found = 0;
     my @files;
@@ -424,8 +425,16 @@ sub lto_experiment {
         }
         if (/\.type[ \t]+(.*?),[ \t]*\@function/ and $1 eq $first_identifier) {
             my ($file, $lineno, $column);
+            # a hash of lines that might end up with the function returning.
+            my %returning_lines;
             my @open_identifiers;
+            my @fcode;
+            my %jumps;
+            my %labels;
+            my $asmlineno = 0;
             while (<$fh>) {
+                chomp;
+                push @fcode, $_;
                 last if (/\.size[ \t]+(.*?),/ and $1 eq $first_identifier);
 
                 if (/\.loc[ \t]+(.*?) (.*?) (.*?)$/) {
@@ -444,13 +453,52 @@ sub lto_experiment {
                 }
                 if (/^[ \t]*ret/) {
                     $function_returns = 1;
+                    $returning_lines{$asmlineno} = 1;
                 }
+                if (/^[ \t]*jmp[ \t]+[a-zA-Z_]/) {
+                    warn "potential sibling call $_, you should have compiled with -fno-optimize-sibling-calls!";
+                    $function_returns = 1;
+                    $returning_lines{$asmlineno} = 1;
+                }
+                if (/^[ \t]*j[a-z]*[ \t](.*?)$/) {
+                    $jumps{$1}{$asmlineno} = 1;
+                }
+                unless (/^[ \t]*(jmpq?)/) {
+                    $jumps{$asmlineno+1}{$asmlineno} = 1;
+                }
+                if (/^([.a-zA-Z0-9_]*):/) {
+                    $labels{$asmlineno}{$1} = $1;
+                }
+                $asmlineno++;
             }
             $found = 1;
+
+            my $done = 0;
+            while (!$done) {
+                $done = 1;
+                for my $asmlineno (keys %returning_lines) {
+                    for my $label (keys %{$labels{$asmlineno}}) {
+                        $done = 0 unless $returning_lines{$label};
+                        $returning_lines{$label} = 1;
+                    }
+                    for my $origin (keys %{$jumps{$asmlineno}}) {
+                        $done = 0 unless $returning_lines{$origin};
+                        $returning_lines{$origin} = 1;
+                    }
+                }
+            }
+            for my $asmlineno (keys %returning_lines) {
+                if ($asmlineno =~ /^[0-9]*$/) {
+                    if ($fcode[$asmlineno] =~ /callq?[ \t]+(.*?)$/) {
+                        $called_and_returning_identifiers{$1} = 1;
+                    }
+                }
+            }
         }
     }
+
     if (!$function_returns) {
-        warn "function doesn't return!";
+        warn "function $first_identifier doesn't return!";
     }
 
     if (!$found) {
@@ -460,22 +508,35 @@ sub lto_experiment {
 
     close $fh;
 
+    if (!$called_and_returning_identifiers{$last_identifier}) {
+        my $noreturn = 1;
+        for my $i (1 .. $#identifiers - 1) {
+            if ($called_and_returning_identifiers{$identifiers[$i]}) {
+                $noreturn = 0;
+            }
+        }
+
+        warn "lto:noreturn := " . $inpath->repr . "\n"
+            if $noreturn;
+    }
+
     for my $called_identifier (sort keys %called_identifiers) {
         for my $line (@{$called_identifiers{$called_identifier}}) {
             my ($f0, $l0, $c0) = @{$line->[0]};
-            warn "function calls $called_identifier after $f0:$l0:$c0\n";
+            warn "function $first_identifier calls $called_identifier after $f0:$l0:$c0\n";
             if ($line->[1]) {
                 my ($f1, $l1, $c1) = @{$line->[1]};
-                warn "function calls $called_identifier between $f0:$l0:$c0 and $f1:$l1:$c1\n";
+                warn "function $first_identifier calls $called_identifier between $f0:$l0:$c0 and $f1:$l1:$c1\n";
             }
             for my $cline (@critlines) {
                 warn "critical line " . $cline;
                 if (inrange($line, $cline)) {
                     warn "in range! oh no!";
+
+                    return 1 if $called_identifier =~ /^\*/; # indirect call
                 }
             }
         }
-        # return 1 if $called_identifier =~ /^\*/; # indirect call
     }
 
     for my $called_identifier (sort keys %called_identifiers) {
@@ -499,7 +560,7 @@ sub baddie {
             my $ret = lto_experiment($subpath, $scaga, $scaga1);
 
             if ($ret) {
-                warn "# lto failed: " . $subpath->repr;
+                warn "lto:unknown := " . $subpath->repr;
             } else {
                 warn "lto:impossible := " . $subpath->repr;
             }
