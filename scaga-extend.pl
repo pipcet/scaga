@@ -242,7 +242,7 @@ sub lto_experiment {
 
     for my $rules (values %{$scaga1->{call}}) {
         for my $rule (@$rules) {
-            my $path = $rule->{in};
+            my $path = $rule->{out};
 
             next unless $path->n == 2;
             my $identifier = $path->last_identifier;
@@ -302,7 +302,7 @@ sub lto_experiment {
     for my $file (@files) {
         my $newfile = $file;
         $newfile =~ s/.*\///;
-        copy($file, $dir . "/" . $newfile);
+        copy($file, $dir . "/" . $newfile) or die "$file / $newfile";
         my $fh;
         open $fh, ">>$dir/$newfile" or die "$file / $newfile";
 
@@ -315,18 +315,28 @@ sub lto_experiment {
             print $fh $proto . " __attribute__(($attr));\n";
         }
 
-        system("$cc $dir/$newfile -o $dir/$newfile.o") and return 1;
+        if (system("$cc $dir/$newfile -o $dir/$newfile.o")) {
+            warn "$cc failed";
+            return 1;
+        }
 
         close $fh;
     }
 
-    system("$lto -o test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @files)) and return 1;
+    if (system("$lto -o test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @files))) {
+        warn "$lto failed";
+        return 1;
+    }
 
     my $fh;
 
-    open $fh, "<test.s" or return 1;
+    unless (open $fh, "<test.s") {
+        warn "no test.s";
+        return 1;
+    }
 
     my %called_identifiers;
+    my $found = 0;
     while (<$fh>) {
         if (/\.type[ \t]+(.*?),[ \t]*\@function/ and $1 eq $first_identifier) {
             while (<$fh>) {
@@ -336,8 +346,12 @@ sub lto_experiment {
                     $called_identifiers{$1} = 1;
                 }
             }
-            last;
+            $found = 1;
         }
+    }
+    if (!$found) {
+        warn "couldn't find $first_identifier";
+        return 1;
     }
 
     close $fh;
@@ -478,6 +492,7 @@ while ($loop_rules--) {
                     while ($do_wait_for_next) {
                         my $command = <STDIN>;
                         chomp $command;
+                        $command =~ s/\A[\n\r]*//msg;
 
                         next path if $command eq "--next";
                         next retry if $command eq "--next=retry";
@@ -485,7 +500,13 @@ while ($loop_rules--) {
                         if ($command =~ /^lto := (.*)$/) {
                             my $path = Scaga::Path->new($1);
 
-                            lto_experiment($path, $scaga, $scaga1);
+                            my $ret = lto_experiment($path, $scaga, $scaga1);
+
+                            if ($ret) {
+                                warn "# lto failed: " . $path->repr;
+                            } else {
+                                warn "lto:impossible := " . $path->repr;
+                            }
                             next;
                         }
                         die $command;
