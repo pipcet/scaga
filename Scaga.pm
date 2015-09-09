@@ -650,6 +650,7 @@ sub short_repr {
     while (scalar grep { !$keep->{$_} } $spath->identifiers < $origlast) {
         $last++;
         $spath = $self->slice($self->n - $last, $self->n);
+        last if $last >= $self->n;
     }
 
     my $repr = $spath->repr;
