@@ -30,11 +30,13 @@ sub fixup {
 for my $call (@$calls) {
     fixup($call);
 
-    $call->{codeline} =~ s/\'//g;
-    $call->{codeline} =~ s/ > />/g;
-    $call->{codeline} =~ s/ >> />>/g;
-    $call->{codeline} =~ s/ = /=/g;
     $call->{codeline} =~ s/\n/ /msg;
+    $call->{codeline} =~ s/\'//g;
+    $call->{codeline} =~ s/ *> */>/g;
+    $call->{codeline} =~ s/ *>> */>>/g;
+    $call->{codeline} =~ s/ *= */=/g;
+    $call->{codeline} =~ s/ *:= */=/g;
+    $call->{codeline} =~ s/ *\| */\|/g;
 
     $call->{caller} =~ s/\* \(\*\)/\*\(\*\)/msg;
     $call->{caller} =~ s/\* \*/\*\*/msg;
@@ -79,9 +81,9 @@ for my $call (@$calls) {
         push @compb, $call->{callee};
         push @compb, $call->{callee_id};
 
-        print join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
+        print "type := " . join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
         pop @compa;
-        print join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
+        print "type := " . join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
         next;
     }
 
@@ -90,12 +92,12 @@ for my $call (@$calls) {
 
     if ($call->{type} ne 'fake' and
         defined($call->{component}) and $call->{caller} eq $call->{callee}) {
-        print join(" = ", @comp0) . " > " . join(" = ", @comp1) . "\n";
+        print "call := " . join(" = ", @comp0) . " > " . join(" = ", @comp1) . "\n";
     }
     if ($call->{type} ne 'fake') {
-        print join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
+        print "call := " . join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
     }
-    print $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
-    print $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
-    print $call->{callee} . " = " . $call->{home} . "\n" if $call->{type} eq 'fake';
+    print "type := " . $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
+    print "type := " . $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
+    print "home := " . $call->{callee} . " = " . $call->{home} . "\n" if $call->{type} eq 'fake';
 }
