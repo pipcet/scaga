@@ -9,11 +9,14 @@ use List::Util qw(shuffle);
 my @rules_files = ();
 my @calls_files = ();
 my @badrules_files = ();
+my @executable_files = ();
 my $do_detect_cycles = 1;
 my $do_wait_for_next = 0;
 my $last = 4;
 my $loop_rules = 1;
 my $verbose = 1;
+my $cflags;
+my $ltoflags;
 
 GetOptions("last=i" => \$last,
            "rules=s" => \@rules_files,
@@ -21,7 +24,10 @@ GetOptions("last=i" => \$last,
            "calls=s" => \@calls_files,
            "loop-rules=i" => \$loop_rules,
            "detect-cycles=i" => \$do_detect_cycles,
-           "wait-for-next=i" => \$do_wait_for_next);
+           "wait-for-next=i" => \$do_wait_for_next,
+           "executable=s" => \@executable_files,
+           "cflags=s" => \$cflags,
+           "lto-flags=s" => \$ltoflags);
 
 sub read_calls {
     my ($file) = @_;
@@ -223,6 +229,132 @@ EOF
     close $fh;
 }
 
+use File::Temp;
+use File::Copy;
+
+# perform an experimental lto-based link to see whether $inpath is a
+# code path gcc generates code for if LTO is performed.
+
+# for example:
+
+# int f(int x) { if (x == 0) complicated_function(); return 3; }
+# int g(void) { return f(1); }
+#
+# $inpath = g > f > complicated_function
+
+# result 0;
+
+sub lto_experiment {
+    my ($inpath) = @_;
+
+    my %type;
+
+    for my $path (@paths) {
+        next unless $path->n == 2;
+        my $identifier = $path->last_identifier;
+
+        my $type;
+
+        for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
+            if (exists $component->{identifier}) {
+                $type = $component->{identifier};
+            }
+        }
+
+        if (defined $type and $type =~ /\(\*\)/) {
+            $type{$identifier} = $type;
+        }
+    }
+
+    my %home;
+
+    for my $path (@paths) {
+        next unless $path->n == 1;
+        my $identifier = $path->last_identifier;
+        my $home;
+
+        for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
+            if (exists $component->{home}) {
+                $home = $component->{home};
+                $home =~ s/:.*//;
+            }
+        }
+
+        if (defined $home) {
+            $home{$identifier} = $home;
+        }
+    }
+
+    my @identifiers = $inpath->identifiers;
+    my $first_identifier = $identifiers[0];
+    my $last_identifier = $identifiers[$#identifiers];
+    my %files;
+
+    for my $identifier (@identifiers) {
+        $files{$home{$identifier}}{$identifier} = 1;
+    }
+
+    my @files = sort keys %files;
+    my $dir = File::Temp->newdir(CLEANUP => 0);
+
+    for my $file (@files) {
+        copy($file, $dir . "/" . $file);
+        my $fh;
+        open $fh, ">>$dir/$file" or die;
+
+        for my $identifier (sort keys %{$files{$file}}) {
+            my $attr = "always_inline";
+            $attr = "noinline" if $identifier eq $first_identifier or
+                $identifier eq $last_identifier;
+            my $proto = $type{$identifier};
+            $proto =~ s/\(\*\)/$identifier/;
+            print $fh $proto . " __attribute__(($attr));\n";
+        }
+
+        system("gcc -I/home/pip/git/emacs/src -I/home/pip/git/emacs -I/home/pip/git/emacs/lib -I/usr/include/gtk-3.0 -I/usr/include/pango-1.0 -I/usr/include/glib-2.0 -I/usr/lib/x86_64-linux-gnu/glib-2.0/include -I/usr/include/cairo -I/usr/include/pixman-1 -I/usr/include/freetype2 -I/usr/include/libpng12 -I/usr/include/gdk-pixbuf-2.0 -I/usr/include/gio-unix-2.0/ -I/usr/include/harfbuzz -I/usr/include/atk-1.0 -I/usr/include/at-spi2-atk/2.0 -I/usr/include/at-spi-2.0 -I/usr/include/dbus-1.0 -I/usr/lib/x86_64-linux-gnu/dbus-1.0/include  -pthread $cflags -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -fltrans -O3 -c $dir/$file -o $dir/$file.o") and return 1;
+
+        close $fh;
+    }
+
+    system("/usr/lib/gcc/x86_64-linux-gnu/5.2.1/lto1 -S -O3 -flto -o test.s -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans " . join(" ", map { $dir . "/" . $_ . ".o" } @files)) and return 1;
+
+    my $fh;
+
+    open $fh, "<test.s" or return 1;
+
+    my %called_identifiers;
+    while (<$fh>) {
+        if (/\.type[ \t]+(.*?),[ \t]*\@function/ and $1 eq $first_identifier) {
+            while (<$fh>) {
+                last if (/\.size[ \t]+(.*?),/ and $1 eq $first_identifier);
+
+                if (/call[ \t]+(.*?)$/) {
+                    $called_identifiers{$1} = 1;
+                }
+            }
+            last;
+        }
+    }
+
+    close $fh;
+
+    for my $called_identifier (sort keys %called_identifiers) {
+        warn "function calls $called_identifier\n";
+    }
+
+    for my $called_identifier (sort keys %called_identifiers) {
+        return 1 if grep { $_ eq $called_identifier } @identifiers;
+    }
+
+    die "success!";
+    return 0;
+}
+
+my $inpath = Scaga::Path->new('x_wm_set_size_hint > Fframe_parameter > Fassq');
+
+lto_experiment($inpath);
+
+exit 0;
  rules_loop:
 while ($loop_rules--) {
     warn "reading rules..." if $verbose;
