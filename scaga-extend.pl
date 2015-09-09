@@ -288,6 +288,40 @@ sub critical_lines {
     return @ret;
 }
 
+sub lto_read {
+    my $fh;
+    open $fh, "<lto-auto-rules.scaga" or return;
+
+    my @strings = <$fh>;
+
+    map { chomp $_ } @strings;
+
+    my $ret = {};
+
+    for my $string (@strings) {
+        $ret->{$string} = 1;
+    }
+
+    return $ret;
+}
+
+sub lto_print {
+    my ($string) = @_;
+
+    my $lto = lto_read();
+
+    return if $lto->{$string};
+
+    warn "$string";
+
+    my $fh;
+    open $fh, ">>lto-auto-rules.scaga" or return;
+
+    print $fh "$string\n";
+
+    close $fh;
+}
+
 # perform an experimental lto-based link to see whether $inpath is a
 # code path gcc generates code for if LTO is performed.
 
@@ -300,8 +334,38 @@ sub critical_lines {
 
 # result: 0
 
+sub rewrite {
+    my ($infile, $outfile) = @_;
+
+    my ($ifh, $ofh);
+    open $ifh, "<$infile" or die;
+    open $ofh, ">$outfile" or die;
+
+    while (<$ifh>) {
+        chomp;
+
+        if (/_setjmp/) {
+            print $ofh "#define _setjmp(x) ({ volatile int xx = 0; (void)(x); *(&xx); })\n";
+            print $ofh "$_\n";
+        } else {
+            print $ofh "$_\n";
+        }
+    }
+
+    return 1;
+}
+
 sub lto_experiment {
     my ($inpath, $scaga, $scaga1) = @_;
+    my $ltos = lto_read;
+
+    my $string = $inpath->repr;
+
+    if ($ltos->{"lto:impossible := " . $string}) {
+        return 0;
+    } elsif ($ltos->{"lto:unknown := " . $string}) {
+        return 1;
+    }
 
     return 1 if $inpath->n == 1;
 
@@ -358,6 +422,9 @@ sub lto_experiment {
     my %files;
 
     for my $identifier (@identifiers) {
+        if ($identifier =~ /\(\*\)/) {
+            next;
+        }
         if (!exists($home{$identifier})) {
             warn "no home for $identifier";
             return 1;
@@ -367,6 +434,7 @@ sub lto_experiment {
 
     my @files = sort keys %files;
     my $dir = File::Temp->newdir(CLEANUP => 0);
+    lto_print "# $dir";
     my @newfiles;
 
     for my $file (@files) {
@@ -381,7 +449,7 @@ sub lto_experiment {
                 }
             }
         }
-        copy($ffile, $dir . "/" . $newfile) or die "$file / $newfile";
+        rewrite($ffile, $dir . "/" . $newfile) or die "$file / $newfile";
         my $fh;
         open $fh, ">>$dir/$newfile" or die "$file / $newfile";
 
@@ -394,6 +462,7 @@ sub lto_experiment {
             print $fh $proto . " __attribute__(($attr));\n";
         }
 
+        warn "$cc $dir/$newfile -o $dir/$newfile.o";
         if (system("$cc $dir/$newfile -o $dir/$newfile.o")) {
             warn "$cc failed";
             return 1;
@@ -403,14 +472,15 @@ sub lto_experiment {
         push @newfiles, $newfile;
     }
 
-    if (system("$lto -o test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles))) {
+    warn "$lto -o $dir/test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles);
+    if (system("$lto -o $dir/test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles))) {
         warn "$lto failed";
-        return 1;
+        # return 1;
     }
 
     my $fh;
 
-    unless (open $fh, "<test.s") {
+    unless (open $fh, "<$dir/test.s") {
         warn "no test.s";
         return 1;
     }
@@ -423,6 +493,7 @@ sub lto_experiment {
     while (<$fh>) {
         if (/\.file[ \t]+(\d*?)[ \t]+\"(.*?)\"$/) {
             $files[$1] = $2;
+            $files[$1] =~ s/.*\///;
         }
         if (/\.type[ \t]+(.*?),[ \t]*\@function/ and $1 eq $first_identifier) {
             my ($file, $lineno, $column);
@@ -509,18 +580,6 @@ sub lto_experiment {
 
     close $fh;
 
-    if (!$called_and_returning_identifiers{$last_identifier}) {
-        my $noreturn = 1;
-        for my $i (1 .. $#identifiers - 1) {
-            if ($called_and_returning_identifiers{$identifiers[$i]}) {
-                $noreturn = 0;
-            }
-        }
-
-        warn "lto:noreturn := " . $inpath->repr . "\n"
-            if $noreturn;
-    }
-
     for my $called_identifier (sort keys %called_identifiers) {
         for my $line (@{$called_identifiers{$called_identifier}}) {
             my ($f0, $l0, $c0) = @{$line->[0]};
@@ -538,6 +597,18 @@ sub lto_experiment {
                 }
             }
         }
+    }
+
+    if (!$called_and_returning_identifiers{$last_identifier}) {
+        my $noreturn = 1;
+        for my $i (1 .. $#identifiers - 1) {
+            if ($called_and_returning_identifiers{$identifiers[$i]}) {
+                $noreturn = 0;
+            }
+        }
+
+        lto_print "lto:noreturn := " . $inpath->repr
+            if $noreturn;
     }
 
     for my $called_identifier (sort keys %called_identifiers) {
@@ -561,9 +632,9 @@ sub baddie {
             my $ret = lto_experiment($subpath, $scaga, $scaga1);
 
             if ($ret) {
-                warn "lto:unknown := " . $subpath->repr;
+                lto_print "lto:unknown := " . $subpath->repr;
             } else {
-                warn "lto:impossible := " . $subpath->repr;
+                lto_print "lto:impossible := " . $subpath->repr;
             }
         }
     }
@@ -706,9 +777,9 @@ while ($loop_rules--) {
                             my $ret = lto_experiment($path, $scaga, $scaga1);
 
                             if ($ret) {
-                                warn "# lto failed: " . $path->repr;
+                                lto_print "lto:unknown :=  " . $path->repr;
                             } else {
-                                warn "lto:impossible := " . $path->repr;
+                                lto_print "lto:impossible := " . $path->repr;
                             }
                             next;
                         }
