@@ -122,3 +122,8 @@ Currently, recursive functions are never inlined.  It would be
 desirable to inline them at least once, in particular if it turns out
 that the recursive code path isn't actually taken, but there appears
 to be no easy way to instruct GCC to do so.
+
+TODO:
+ - syntax highlighting in scaga-mode
+ - better support for _setjmp()
+ - parallelize LTO compilations
