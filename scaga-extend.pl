@@ -125,7 +125,7 @@ sub path_expansions {
 
     my @rules;
 
-    $param //= { drop => 1, impossible => 1, subst => 1, "impossible:lto" => 1, "subst:lto" => 1 };
+    $param //= { drop => 1, impossible => 1, subst => 1, "lto:impossible" => 1, "lto:devirt" => 1, "lto:noreturn" => 1 };
 
     for my $identifier (@identifiers) {
         for my $kind (sort keys %$param) {
@@ -340,8 +340,8 @@ sub rewrite {
     my ($infile, $outfile) = @_;
 
     my ($ifh, $ofh);
-    open $ifh, "<$infile" or die;
-    open $ofh, ">$outfile" or die;
+    open $ifh, "<$infile" or return 0;
+    open $ofh, ">$outfile" or return 0;
     my $line = 1;
 
     while (<$ifh>) {
@@ -367,12 +367,14 @@ sub lto_experiment {
     my $string = $inpath->repr;
 
     if ($ltos->{"lto:impossible := " . $string}) {
-        return 0;
+        return 'impossible';
+    } elsif ($ltos->{"lto:noreturn := " . $string}) {
+        return 'noreturn';
     } elsif ($ltos->{"lto:unknown := " . $string}) {
-        return 1;
+        return 'unknown';
     }
 
-    return 1 if $inpath->n == 1;
+    return 'unknown' if $inpath->n == 1;
 
     my @critlines = critical_lines($inpath, $scaga, $scaga1);
     my @critlines1 = critical_lines($inpath, $scaga, $scaga1, 1);
@@ -433,7 +435,7 @@ sub lto_experiment {
         }
         if (!exists($home{$identifier})) {
             warn "no home for $identifier";
-            return 1;
+            return 'unknown';
         }
         $files{$home{$identifier}}{$identifier} = 1;
     }
@@ -454,6 +456,12 @@ sub lto_experiment {
                     last;
                 }
             }
+        } else {
+            $ffile = $file;
+        }
+        unless (defined $ffile) {
+            warn "can't find $file in @source_directories";
+            return 'unknown';
         }
         rewrite($ffile, $dir . "/" . $newfile) or die "$file / $newfile";
         my $fh;
@@ -471,7 +479,7 @@ sub lto_experiment {
         warn "$cc $dir/$newfile -o $dir/$newfile.o";
         if (system("$cc $dir/$newfile -o $dir/$newfile.o")) {
             warn "$cc failed";
-            return 1;
+            return 'unknown';
         }
 
         close $fh;
@@ -488,7 +496,7 @@ sub lto_experiment {
 
     unless (open $fh, "<$dir/test.s") {
         warn "no test.s";
-        return 1;
+        return 'unknown';
     }
 
     my %called_identifiers;
@@ -600,10 +608,23 @@ sub lto_experiment {
 
     if (!$found) {
         warn "couldn't find $first_identifier";
-        return 1;
+        return 'unknown';
     }
 
     close $fh;
+
+    my $noreturn = 0;
+    if (!$called_and_returning_identifiers{$last_identifier}) {
+        $noreturn = 1;
+        for my $i (1 .. $#identifiers - 1) {
+            if ($called_and_returning_identifiers{$identifiers[$i]}) {
+                $noreturn = 0;
+            }
+        }
+
+        lto_print "lto:noreturn := " . $inpath->repr
+            if $noreturn;
+    }
 
     my @critical_called_identifiers;
     for my $called_identifier (sort keys %called_identifiers) {
@@ -616,11 +637,9 @@ sub lto_experiment {
             }
             for my $cline (@critlines) {
                 if (inrange($line, $cline)) {
-                    push @critical_called_identifiers, $called_identifier
-                        if $cline eq $critlines[$#critlines - 1];
                     warn "in range! oh no!";
 
-                    return 1 if $called_identifier =~ /^\*/; # indirect call
+                    return ($noreturn ? 'noreturn' : 'unknown') if $called_identifier =~ /^\*/; # indirect call
                 }
             }
             for my $cline (@critlines1) {
@@ -638,45 +657,44 @@ sub lto_experiment {
         }
     }
 
-    if (!$called_and_returning_identifiers{$last_identifier}) {
-        my $noreturn = 1;
-        for my $i (1 .. $#identifiers - 1) {
-            if ($called_and_returning_identifiers{$identifiers[$i]}) {
-                $noreturn = 0;
-            }
-        }
-
-        lto_print "lto:noreturn := " . $inpath->repr
-            if $noreturn;
-    }
-
     for my $called_identifier (sort keys %called_identifiers) {
-        return 1 if grep { $_ eq $called_identifier } @identifiers;
+        return ($noreturn ? 'noreturn' : 'unknown') if grep { $_ eq $called_identifier } @identifiers;
         $called_identifier =~ s/\..*//;
-        return 1 if grep { $_ eq $called_identifier } @identifiers;
+        return ($noreturn ? 'noreturn' : 'unknown') if grep { $_ eq $called_identifier } @identifiers;
     }
 
-    return 0;
+    return 'impossible';
 }
 
 sub baddie {
     my ($path, $scaga, $scaga1) = @_;
 
+    warn "baddie " . $path->repr;
+
     my $n = $path->n;
 
     for my $i (0 .. $n-1) {
-        for my $j ($i+1 .. $i+4) {
-            next if $j >= $n;
+        for my $l (1 .. 5) {
+            my $j = $i + $l;
+            next if $j > $n;
             my $subpath = $path->slice($i, $j);
             my $ret = lto_experiment($subpath, $scaga, $scaga1);
 
-            if ($ret) {
+            if ($ret eq 'unknown') {
                 lto_print "lto:unknown := " . $subpath->repr;
-            } else {
+            } elsif ($ret eq 'noreturn') {
+                return 1;
+            } elsif ($ret eq 'impossible') {
                 lto_print "lto:impossible := " . $subpath->repr;
+
+                return 1;
+            } else {
+                die "$ret";
             }
         }
     }
+
+    return 0;
 }
 
  rules_loop:
@@ -684,7 +702,7 @@ while ($loop_rules--) {
     my %usecount;
 
     my $oldpaths;
-    my $paths;
+    my $paths = {};
     my $scaga = hash_scaga(read_scaga(@scaga_files));
     my @paths;
     for my $rules (values %{$scaga->{start}}) {
@@ -729,7 +747,7 @@ while ($loop_rules--) {
                 my $identifier = $path->last_identifier;
                 push @calls, @{$scaga1->{call}{$identifier}} if defined $identifier and $scaga1->{call}{$identifier};
                 for my $call (@calls) {
-                    my $match_param = { lstrict => { component => 1 }};
+                    my $match_param = { rstrict => { component => 1 }};
                     my $m = $path->endmatch($call->{in}, $match_param);
                     my $n = $call->{in}->n;
 
@@ -798,10 +816,10 @@ while ($loop_rules--) {
 
                 my $param = { baddie => 1 };
                 my $bres = path_expansions($path, $scaga, $param);
-                if (@$bres != 1) {
-                    baddie($path, $scaga, $scaga1);
+                if (@$bres != 1 and
+                    !baddie($path, $scaga, $scaga1)) {
                     warn $path->repr;
-                    warn "!!!sequence: " . $gsequence++;
+                    warn "!!!sequence: " . $gsequence++ . "\n";
                     while ($do_wait_for_next) {
                         my $command = <STDIN>;
                         chomp $command;
