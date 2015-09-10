@@ -72,3 +72,53 @@ generates instructions to return from it.
 
 The noreturn code is currently specific to the x86_64 architecture,
 since it involves x86 assembler code.
+
+Devirtualization:
+
+Consider this code, from Emacs:
+
+```
+static Lisp_Object
+x_clipboard_manager_save (Lisp_Object frame)
+{
+  struct frame *f = XFRAME (frame);
+  struct x_display_info *dpyinfo = FRAME_DISPLAY_INFO (f);
+  Atom data = dpyinfo->Xatom_UTF8_STRING;
+
+  XChangeProperty (FRAME_X_DISPLAY (f), FRAME_X_WINDOW (f),
+                   dpyinfo->Xatom_EMACS_TMP,
+                   dpyinfo->Xatom_ATOM, 32, PropModeReplace,
+                   (unsigned char *) &data, 1);
+  x_get_foreign_selection (QCLIPBOARD_MANAGER, QSAVE_TARGETS,
+                           Qnil, frame);
+  return Qt;
+}
+
+void
+x_clipboard_manager_save_all (void)
+{
+    ...
+          internal_condition_case_1 (x_clipboard_manager_save, local_frame,
+                                     Qt, x_clipboard_manager_error_2);
+    ...
+}
+```
+
+With inlining, LTO correctly recognizes that no general function
+pointer is being called: it rejects the call chain
+`x_clipboard_manager_save_all > internal_condition_case_1 >
+Lisp_Object (*)(Lisp_Object)`. It also generates a special devirtualization rule that looks like this:
+
+```
+lto:devirt := x_clipboard_manager_save_all > internal_condition_case_1 > Lisp_Object (*)(Lisp_Object) => x_clipboard_manager_save_all > internal_condition_case_1 > x_clipboard_manager_save
+```
+
+If this rule takes effect, it allows only the desired call paths to be
+considered.
+
+Recursive functions:
+
+Currently, recursive functions are never inlined.  It would be
+desirable to inline them at least once, in particular if it turns out
+that the recursive code path isn't actually taken, but there appears
+to be no easy way to instruct GCC to do so.
