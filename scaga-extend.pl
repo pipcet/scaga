@@ -263,14 +263,14 @@ sub inrange {
 # return the "critical" lines at which the calls making up our call
 # chain are made.
 sub critical_lines {
-    my ($path0, $scaga, $scaga1) = @_;
+    my ($path0, $scaga, $scaga1, $only_last) = @_;
     my @ret;
 
     for my $rules (values %{$scaga1->{call}}) {
         for my $rule (@$rules) {
             my $path = $rule->{out};
 
-            next unless $path0->submatch($path);
+            next unless ($only_last ? $path0->endmatch($path) : $path0->submatch($path));
 
             next unless $path->n == 2;
             my $identifier = $path->last_identifier;
@@ -284,6 +284,8 @@ sub critical_lines {
             }
         }
     }
+
+    warn "critical lines: " . Dumper(\@ret);
 
     return @ret;
 }
@@ -340,16 +342,19 @@ sub rewrite {
     my ($ifh, $ofh);
     open $ifh, "<$infile" or die;
     open $ofh, ">$outfile" or die;
+    my $line = 1;
 
     while (<$ifh>) {
         chomp;
 
         if (/_setjmp/) {
             print $ofh "#define _setjmp(x) ({ volatile int xx = 0; (void)(x); *(&xx); })\n";
+            print $ofh "#line $line\n";
             print $ofh "$_\n";
         } else {
             print $ofh "$_\n";
         }
+        $line++;
     }
 
     return 1;
@@ -370,6 +375,7 @@ sub lto_experiment {
     return 1 if $inpath->n == 1;
 
     my @critlines = critical_lines($inpath, $scaga, $scaga1);
+    my @critlines1 = critical_lines($inpath, $scaga, $scaga1, 1);
 
     my %type;
 
@@ -504,6 +510,7 @@ sub lto_experiment {
             my %jumps;
             my %labels;
             my $asmlineno = 0;
+            my @linenos;
             while (<$fh>) {
                 chomp;
                 push @fcode, $_;
@@ -512,18 +519,14 @@ sub lto_experiment {
                 if (/\.loc[ \t]+(.*?) (.*?) (.*?)$/) {
                     ($file, $lineno, $column) = ($files[$1], $2, $3);
 
-                    for my $identifier (@open_identifiers) {
-                        my $lines = $called_identifiers{$identifier};
-                        my $line = $lines->[$#$lines];
-                        $line->[1] = [$file, $lineno, $column];
-                    }
-                    @open_identifiers = ();
+                    push @linenos, [$file, $lineno, $column];
+
                 }
                 if (/callq?[ \t]+(.*?)$/) {
                     push @{$called_identifiers{$1}}, [ [$file, $lineno, $column] ];
                     push @open_identifiers, $1;
                 }
-                if (/^[ \t]*ret/) {
+                if (/^[ \t]*(rep[ \t]+)?ret/) {
                     $function_returns = 1;
                     $returning_lines{$asmlineno} = 1;
                 }
@@ -543,6 +546,25 @@ sub lto_experiment {
                 }
                 $asmlineno++;
             }
+            my @linenos = sort { $a->[0] cmp $b->[0] || $a->[1] <=> $b->[1] } @linenos;
+
+          id:
+            for my $identifier (@open_identifiers) {
+                my $lines = $called_identifiers{$identifier};
+                my $line = $lines->[$#$lines];
+                my $i = 0;
+
+                for my $i (reverse (0 .. $#linenos-1)) {
+                    if ($linenos[$i]->[0] eq $line->[0]->[0] and
+                        $linenos[$i]->[1] == $line->[0]->[1]) {
+                        warn Dumper($linenos[$i]) . Dumper($linenos[$i+1]);
+                        $line->[1] = $linenos[$i+1];
+                        next id;
+                    }
+                }
+          }
+
+            @open_identifiers = ();
             $found = 1;
 
             my $done = 0;
@@ -562,7 +584,10 @@ sub lto_experiment {
             for my $asmlineno (keys %returning_lines) {
                 if ($asmlineno =~ /^[0-9]*$/) {
                     if ($fcode[$asmlineno] =~ /callq?[ \t]+(.*?)$/) {
-                        $called_and_returning_identifiers{$1} = 1;
+                        my $identifier = $1;
+                        $called_and_returning_identifiers{$identifier} = 1;
+                        $identifier =~ s/\..*//;
+                        $called_and_returning_identifiers{$identifier} = 1;
                     }
                 }
             }
@@ -580,6 +605,7 @@ sub lto_experiment {
 
     close $fh;
 
+    my @critical_called_identifiers;
     for my $called_identifier (sort keys %called_identifiers) {
         for my $line (@{$called_identifiers{$called_identifier}}) {
             my ($f0, $l0, $c0) = @{$line->[0]};
@@ -589,13 +615,26 @@ sub lto_experiment {
                 warn "function $first_identifier calls $called_identifier between $f0:$l0:$c0 and $f1:$l1:$c1\n";
             }
             for my $cline (@critlines) {
-                warn "critical line " . $cline;
                 if (inrange($line, $cline)) {
+                    push @critical_called_identifiers, $called_identifier
+                        if $cline eq $critlines[$#critlines - 1];
                     warn "in range! oh no!";
 
                     return 1 if $called_identifier =~ /^\*/; # indirect call
                 }
             }
+            for my $cline (@critlines1) {
+                if (inrange($line, $cline)) {
+                    push @critical_called_identifiers, $called_identifier;
+                }
+            }
+        }
+    }
+
+    if ($last_identifier =~ /\(\*\)/) {
+        for my $cci (@critical_called_identifiers) {
+            my $newpath = $inpath->slice(0, $inpath->n - 1)->concat(Scaga::Path->new($cci));
+            lto_print "lto:devirt := " . $inpath->repr . " => " . $newpath->repr;
         }
     }
 
@@ -866,13 +905,15 @@ while ($loop_rules--) {
         $iteration++;
     }
 
-    for my $hash (values %$oldpaths) {
-        if (ref $hash) {
-            for my $path (keys %$hash) {
-                print $path . "\n";
+    if (0) {
+        for my $hash (values %$oldpaths) {
+            if (ref $hash) {
+                for my $path (keys %$hash) {
+                    print $path . "\n";
+                }
+            } else {
+                print $hash . "\n";
             }
-        } else {
-            print $hash . "\n";
         }
     }
 }
