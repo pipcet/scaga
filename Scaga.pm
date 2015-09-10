@@ -46,6 +46,17 @@ sub match {
         }
     }
 
+    for my $rkey (keys %$other) {
+        next if $rkey eq "codeline";
+        next if $rkey eq "flc";
+        next if $rkey eq "home";
+
+        if ($param && $param->{rstrict}->{$rkey} &&
+            !defined($self->{$rkey})) {
+            return 0;
+        }
+    }
+
     return 1;
 }
 
@@ -426,7 +437,7 @@ use Data::Dumper;
 sub match {
     my ($self, $other, $param) = @_;
 
-    die $self->repr unless @{$self->{components}} and @{$other->{components}};
+    die $self->repr . " ~ " . $other->repr unless @{$self->{components}} and @{$other->{components}};
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
@@ -728,6 +739,7 @@ sub increasing_sequences {
 sub submatch {
     my ($self, $other, $param) = @_;
 
+    # warn $self->repr . " ~ " . $other->repr;
     die unless $other->isa('Scaga::Path');
 
     die("LHS must be a PPath, but " . $self->repr . " isn't one.") unless @{$self->{ppaths}} == 1;
