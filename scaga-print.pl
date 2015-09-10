@@ -27,6 +27,26 @@ sub fixup {
     }
 }
 
+sub print_rule {
+    my ($kind, @arrays) = @_;
+    my @strs;
+
+    for my $i (0 .. $#arrays) {
+        @{$arrays[$i]} = grep { defined($_) and $_ ne "" } @{$arrays[$i]};
+        return unless @{$arrays[$i]};
+        for my $j (0 .. $#{$arrays[$i]}) {
+            for my $k ($j+1 .. $#{$arrays[$i]}) {
+                if ($arrays[$i][$j] eq $arrays[$i][$k]) {
+                    splice @{$arrays[$i]}, $k, 1;
+                }
+            }
+        }
+        push @strs, join(" = ", @{$arrays[$i]});
+    }
+
+    print "$kind := " . join(" > ", @strs) . "\n";
+}
+
 for my $call (@$calls) {
     fixup($call);
 
@@ -48,56 +68,45 @@ for my $call (@$calls) {
 
     $call->{component} =~ s/.*(\.|->)//msg;
     $call->{component} = "component:" . $call->{component} if defined $call->{component};
+    $call->{codeline} = "'" . $call->{codeline} . "'" if defined $call->{codeline};
     $call->{intype} = "intype:" . $call->{intype} if defined $call->{intype};
     $call->{flc} = "FLC:" . $call->{file} . ":" . $call->{line} . ":" . $call->{col};
     $call->{home} = "home:" . $call->{file} . ":" . $call->{line} . ":" . $call->{col};
-    my @comp0;
-    push @comp0, $call->{caller_type};
-    push @comp0, $call->{component} if defined $call->{component};
-
-    my @comp1;
-    push @comp1, $call->{callee_type};
-
-    my @comp2;
-    push @comp2, $call->{caller};
-    push @comp2, $call->{flc} if defined $call->{flc};
-    push @comp2, "'" . $call->{codeline} . "'" if defined $call->{codeline};
-    push @comp2, $call->{caller_id};
-
-    my @comp3;
-    push @comp3, $call->{callee};
-    push @comp3, $call->{callee_id};
-    push @comp3, $call->{component} if defined $call->{component};
-    push @comp3, $call->{intype} if defined $call->{intype};
 
     if ($call->{type} eq 'symbol') {
         next if $call->{inexpr} ne $call->{callee_type};
 
-        my @compa;
-        push @compa, $call->{caller_type};
-        push @compa, $call->{component};
-
-        my @compb;
-        push @compb, $call->{callee};
-        push @compb, $call->{callee_id};
-
-        print "type := " . join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
-        pop @compa;
-        print "type := " . join(" = ", @compa) . " > " . join(" = ", @compb) . "\n";
+        print_rule("type",
+                   [ $call->{caller_type}, $call->{component} ],
+                   [ $call->{callee}, $call->{$callee_id} ]);
+        # print_rule("type",
+        #            [ $call->{caller_type} ],
+        #            [ $call->{callee}, $call->{$callee_id} ]);
         next;
     }
 
-    #next if ($call->{caller} eq $call->{callee}) and !defined($call->{component}); # XXX distinguish actual recursive
-                                # calls from type-only fake calls.
-
     if ($call->{type} ne 'fake' and
         defined($call->{component}) and $call->{caller} eq $call->{callee}) {
-        print "call := " . join(" = ", @comp0) . " > " . join(" = ", @comp1) . "\n";
+        print_rule("call", [$call->{caller_type}],
+                   [$call->{callee_type}, $call->{component}]);
     }
     if ($call->{type} ne 'fake') {
-        print "call := " . join(" = ", @comp2) . " > " . join(" = ", @comp3) . "\n";
+        print_rule("call", [$call->{caller}, $call->{flc}, $call->{codeline}],
+                   [$call->{callee}, $call->{callee_id}, $call->{component}, $call->{intype}]);
     }
-    print "type := " . $call->{caller_type} . " > " . $call->{caller} . "\n" unless $call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "";
-    print "type := " . $call->{callee_type} . " > " . $call->{callee} . "\n" unless $call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "";
-    print "home := " . $call->{callee} . " = " . $call->{home} . "\n" if $call->{type} eq 'fake';
+    unless ($call->{caller_type} eq $call->{caller} or $call->{caller_type} eq "" or $call->{caller} eq "") {
+        print_rule("type",
+                   [$call->{caller_type}],
+                   [$call->{caller}]);
+    }
+    unless ($call->{callee_type} eq $call->{callee} or $call->{callee_type} eq "" or $call->{callee} eq "") {
+        print_rule("type",
+                   [$call->{callee_type}, $call->{component}],
+                   [$call->{callee}]);
+    }
+
+    if ($call->{type} eq 'fake') {
+        print_rule("home",
+                   [$call->{callee}, $call->{home}]);
+    }
 }
