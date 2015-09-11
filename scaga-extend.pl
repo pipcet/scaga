@@ -40,7 +40,7 @@ my @scaga = read_scaga(@scaga_files);
 my @scaga1 = read_scaga(@calls_files);
 
 sub read_scaga {
-    warn "reading scaga...";
+#    warn "reading scaga...";
     my @ret;
     for my $file (@_) {
         my $fh;
@@ -69,12 +69,12 @@ sub read_scaga {
         close $fh;
     }
 
-    warn "reading scaga done.";
+#    warn "reading scaga done.";
     return @ret;
 }
 
 sub hash_scaga {
-    warn "hashing scaga...";
+#    warn "hashing scaga...";
     my (@rules) = @_;
     my $ret = { call => { "" => [] }};
     for my $rule (@rules) {
@@ -106,7 +106,7 @@ sub hash_scaga {
         }
     }
 
-    warn "hashing scaga done.";
+#    warn "hashing scaga done.";
     return $ret;
 }
 
@@ -669,7 +669,7 @@ sub lto_experiment {
 sub baddie {
     my ($path, $scaga, $scaga1) = @_;
 
-    warn "baddie " . $path->repr;
+    # warn "baddie " . $path->repr;
 
     my $n = $path->n;
 
@@ -818,9 +818,9 @@ while ($loop_rules--) {
                 my $bres = path_expansions($path, $scaga, $param);
                 if (@$bres != 1 and
                     !baddie($path, $scaga, $scaga1)) {
-                    warn $path->repr;
-                    warn "!!!sequence: " . $gsequence++ . "\n";
+                    print $path->repr . "\n";
                     while ($do_wait_for_next) {
+                        print "!!!sequence: " . $gsequence++ . "\n";
                         my $command = <STDIN>;
                         chomp $command;
                         $command =~ s/\A[\n\r]*//msg;
