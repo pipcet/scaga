@@ -290,6 +290,25 @@ sub critical_lines {
     return @ret;
 }
 
+sub generate_keep {
+    my $keep = {};
+    return $keep;
+    for my $kind (keys %$scaga) {
+        # for my $identifier (keys %{$scaga->{$kind}}) {
+        #     $keep->{$identifier} = 1;
+        # }
+        for my $rules (values %{$scaga->{$kind}}) {
+            for my $rule (@$rules) {
+                for my $i (0 .. $rule->{in}->n-1) {
+                    $keep->{$rule->{in}->slice($i, $i+1)->repr} = 1;
+                }
+            }
+        }
+    }
+
+    return $keep;
+}
+
 sub lto_read {
     return {};
 
@@ -722,17 +741,7 @@ while ($loop_rules--) {
  retry:
     while($notreallydone) {
         my $scaga = hash_scaga(read_scaga(@scaga_files));
-        my $keep;
-        for my $kind (keys %$scaga) {
-            for my $identifier (keys %{$scaga->{$kind}}) {
-                $keep->{$identifier} = 1;
-            }
-        }
-        for my $kind (keys %$scaga1) {
-            for my $identifier (keys %{$scaga1->{$kind}}) {
-                $keep->{$identifier} = 1;
-            }
-        }
+        my $keep = generate_keep();
         $notreallydone = 0;
 
         my $retry = $paths;
