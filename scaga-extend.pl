@@ -747,7 +747,7 @@ while ($loop_rules--) {
                 my $identifier = $path->last_identifier;
                 push @calls, @{$scaga1->{call}{$identifier}} if defined $identifier and $scaga1->{call}{$identifier};
                 for my $call (@calls) {
-                    my $match_param = { rstrict => { component => 1 }};
+                    my $match_param = { lstrict => { component => 1 }};
                     my $m = $path->endmatch($call->{in}, $match_param);
                     my $n = $call->{in}->n;
 
