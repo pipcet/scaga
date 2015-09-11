@@ -671,12 +671,12 @@ sub short_repr {
 
     return $self->{short_repr}->{$last} if exists $self->{short_repr}->{$last};
 
-    my $spath;
+    my $spath = $self;
     for ($last = $origlast; $count < $origlast and $last++ <= $self->n;) {
         $spath = $self->slice($self->n - $last, $self->n);
         my $lcomp = $self->slice($self->n - $last, $self->n - $last + 1);
 
-        if ($keep->{$lcomp->repr}) {
+        if (0 and $keep->{$lcomp->repr}) {
             next;
         }
 
@@ -688,7 +688,8 @@ sub short_repr {
     #     last if $last >= $self->n;
     # }
 
-    my $repr = $spath->repr;
+    # my $repr = $spath->repr;
+    my $repr = $spath->last_identifier;
 
     $self->{short_repr}->{$origlast} = $repr;
 
