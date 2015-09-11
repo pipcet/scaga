@@ -1,6 +1,34 @@
 (defvar scaga-timer nil)
 (defvar scaga-next nil)
 
+(defun scaga-process-summary ()
+  (let (ret)
+    (if (process-live-p scaga-process)
+        (let* ((pid (process-id scaga-process))
+               (pa (process-attributes pid))
+               (rss (cdr (assq 'rss pa)))
+               (state (cdr (assq 'state pa)))
+               (pcpu (cdr (assq 'pcpu pa))))
+          (if rss (push (format "RSS: %dKB" rss) ret))
+          (if state (push (format "state: %S" state) ret))
+          (if pcpu (push (format "CPU: %f%%" pcpu) ret)))
+      (push "(dead)" ret))
+    (mapconcat #'identity ret " | ")))
+
+(defun scaga-process-status (&optional status)
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char (cdr (assq 'process-status scaga-markers)))
+      (insert "Process status: " (scaga-process-summary) "  " (or status (format "%S\n" (process-status scaga-process))))
+      (delete-region (point) (cdr (assq 'after-process-status scaga-markers))))))
+
+(defun scaga-sentinel (process status)
+  (let* ((pbuffer (process-buffer process))
+         (buffer (with-current-buffer pbuffer scaga-buffer)))
+    (with-current-buffer buffer
+      (when (eq process scaga-process)
+        (scaga-process-status (if (equal status "run") "run\n" status))))))
+
 (defun scaga-start (&rest args)
   (let ((pbuffer (generate-new-buffer "*scaga*"))
         (buffer (current-buffer)))
@@ -10,7 +38,13 @@
       (set (make-local-variable 'scaga-buffer) buffer)
       (set (make-local-variable 'scaga-sequence) 0))
     (setq scaga-rules-buffer (find-file-noselect (car scaga-rules)))
-    (setq scaga-process (apply #'start-process "SCAGA" pbuffer args))))
+    (setq scaga-process (apply #'start-process "SCAGA" pbuffer args))
+    (set-process-sentinel scaga-process #'scaga-sentinel)
+    (let ((inhibit-read-only t))
+      (save-excursion
+        (goto-char (cdr (assq 'process-status scaga-markers)))
+        (insert "Process status: PID " (format "%S" (process-id scaga-process)) "\n")
+        (delete-region (point) (cdr (assq 'after-process-status scaga-markers)))))))
 
 (defun scaga-insert-excerpt (file around-line)
   (when nil
@@ -167,7 +201,9 @@
   "Automated update function run when there is new SCAGA process output."
   (when (buffer-live-p (with-current-buffer buffer (process-buffer scaga-process)))
     (with-current-buffer
-        (with-current-buffer buffer (process-buffer scaga-process))
+        (with-current-buffer buffer
+          (scaga-process-status)
+          (process-buffer scaga-process))
       (save-excursion
         (goto-char 1)
         (when (looking-at-p ".*\n[^!]")
@@ -388,5 +424,6 @@
   (widget-setup)
   (scaga-mode)
   (setq buffer-read-only nil))
+    (insert "Process status: not started\n")
 
 (provide 'scaga-mode)
