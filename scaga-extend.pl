@@ -291,6 +291,8 @@ sub critical_lines {
 }
 
 sub lto_read {
+    return {};
+
     my $fh;
     open $fh, "<lto-auto-rules.scaga" or return;
 
@@ -308,6 +310,8 @@ sub lto_read {
 }
 
 sub lto_print {
+    return;
+
     my ($string) = @_;
 
     my $lto = lto_read();
@@ -774,16 +778,6 @@ while ($loop_rules--) {
         @paths = ();
 
         $scaga = hash_scaga(read_scaga(@scaga_files));
-        for my $kind (keys %$scaga) {
-            for my $identifier (keys %{$scaga->{$kind}}) {
-                $keep->{$identifier} = 1;
-            }
-        }
-        for my $kind (keys %$scaga1) {
-            for my $identifier (keys %{$scaga1->{$kind}}) {
-                $keep->{$identifier} = 1;
-            }
-        }
         my $done = 0;
         while (!$done) {
             $done = 1;
@@ -802,7 +796,7 @@ while ($loop_rules--) {
                 my $res = path_expansions($path, $scaga);
 
                 if ($res) {
-                    #$done = 0 if @$res > 1;
+                    $done = 0 if @$res > 1;
                     for my $outpath (@$res) {
                         next if $outpath->cycle;
                         push @outpaths, $outpath;
@@ -865,23 +859,23 @@ while ($loop_rules--) {
         # }
         # warn "done. " . scalar(keys %oldpaths) . " paths, iteration " . $iteration . "." if $verbose;
 
-        for my $hash (values %$scaga) {
-            for my $rules (values %$hash) {
-                for my $rule (@$rules) {
-                    $usecount{$rule->repr} += $rule->{usecount};
-                    $rule->{usecount} = 0;
-                }
-            }
-        }
+        # for my $hash (values %$scaga) {
+        #     for my $rules (values %$hash) {
+        #         for my $rule (@$rules) {
+        #             $usecount{$rule->repr} += $rule->{usecount};
+        #             $rule->{usecount} = 0;
+        #         }
+        #     }
+        # }
 
-        for my $hash (values %$scaga1) {
-            for my $rules (values %$hash) {
-                for my $rule (@$rules) {
-                    $usecount{$rule->repr} += $rule->{usecount};
-                    $rule->{usecount} = 0;
-                }
-            }
-        }
+        # for my $hash (values %$scaga1) {
+        #     for my $rules (values %$hash) {
+        #         for my $rule (@$rules) {
+        #             $usecount{$rule->repr} += $rule->{usecount};
+        #             $rule->{usecount} = 0;
+        #         }
+        #     }
+        # }
 
         my $fh;
         open $fh, ">rules-last-$last-iteration-$iteration.scaga";
@@ -907,16 +901,6 @@ while ($loop_rules--) {
             $notreallydone = 1;
             $oldpaths = \%oldpaths;
             $scaga = hash_scaga(read_scaga(@scaga_files));
-            for my $kind (keys %$scaga) {
-                for my $identifier (keys %{$scaga->{$kind}}) {
-                    $keep->{$identifier} = 1;
-                }
-            }
-            for my $kind (keys %$scaga1) {
-                for my $identifier (keys %{$scaga1->{$kind}}) {
-                    $keep->{$identifier} = 1;
-                }
-            }
             next retry;
         }
 
