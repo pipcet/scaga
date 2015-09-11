@@ -665,18 +665,34 @@ sub repr {
 sub short_repr {
     my ($self, $last, $keep) = @_;
     my $origlast = $last;
+    my $count = 0;
+
+    return "" if $self->n == 0;
+
     return $self->{short_repr}->{$last} if exists $self->{short_repr}->{$last};
 
-    my $spath = $self->slice($self->n - $last, $self->n);
-    while (scalar grep { !$keep->{$_} } $spath->identifiers < $origlast) {
-        $last++;
+    my $spath;
+    for ($last = $origlast; $count < $origlast and $last++ <= $self->n;) {
         $spath = $self->slice($self->n - $last, $self->n);
-        last if $last >= $self->n;
+        my $lcomp = $self->slice($self->n - $last, $self->n - $last + 1);
+
+        if ($keep->{$lcomp->repr}) {
+            next;
+        }
+
+        $count++;
     }
+    # while (scalar(grep { !$keep->{$_} } $spath->identifiers) < $origlast) {
+    #     $last++;
+    #     $spath = $self->slice($self->n - $last, $self->n);
+    #     last if $last >= $self->n;
+    # }
 
     my $repr = $spath->repr;
 
     $self->{short_repr}->{$origlast} = $repr;
+
+    # warn "short_repr: " . $self->repr . " => " . $repr if $last > 1;
 
     return $repr;
 }
