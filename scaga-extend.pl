@@ -397,8 +397,6 @@ sub lto_experiment {
         return 'unknown';
     }
 
-    return 'unknown' if $inpath->n == 1;
-
     my @critlines = critical_lines($inpath, $scaga, $scaga1);
     my @critlines1 = critical_lines($inpath, $scaga, $scaga1, 1);
 
@@ -635,6 +633,10 @@ sub lto_experiment {
     }
 
     close $fh;
+
+    if ($inpath->n == 1) {
+        return $function_returns ? 'unknown' : 'noreturn';
+    }
 
     my $noreturn = 0;
     if (!$called_and_returning_identifiers{$last_identifier}) {
