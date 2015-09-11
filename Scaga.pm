@@ -32,27 +32,10 @@ sub match {
 
     for my $lkey (keys %$self) {
         next if $lkey eq "codeline";
-        next if $lkey eq "flc";
         next if $lkey eq "home";
 
         if (defined($other->{$lkey}) and
             $other->{$lkey} ne $self->{$lkey}) {
-            return 0;
-        }
-
-        if ($param && $param->{lstrict}->{$lkey} &&
-            !defined($other->{$lkey})) {
-            return 0;
-        }
-    }
-
-    for my $rkey (keys %$other) {
-        next if $rkey eq "codeline";
-        next if $rkey eq "flc";
-        next if $rkey eq "home";
-
-        if ($param && $param->{rstrict}->{$rkey} &&
-            !defined($self->{$rkey})) {
             return 0;
         }
     }
@@ -438,6 +421,33 @@ sub match {
     my ($self, $other, $param) = @_;
 
     die $self->repr . " ~ " . $other->repr unless @{$self->{components}} and @{$other->{components}};
+
+    my %lkeys;
+    my %rkeys;
+
+    for my $lcomp (@{$self->{components}}) {
+        for my $lkey (keys %$lcomp) {
+            $lkeys{$lkey} = 1;
+        }
+    }
+
+    for my $rcomp (@{$other->{components}}) {
+        for my $rkey (keys %$rcomp) {
+            $rkeys{$rkey} = 1;
+        }
+    }
+
+    for my $lkey (keys %lkeys) {
+        if (!$rkeys{$lkey} and $param and $param->{lstrict}->{$lkey}) {
+            return 0;
+        }
+    }
+
+    for my $rkey (keys %rkeys) {
+        if (!$lkeys{$rkey} and $param and $param->{rstrict}->{$rkey}) {
+            return 0;
+        }
+    }
 
     for my $lcomp (@{$self->{components}}) {
         for my $rcomp (@{$other->{components}}) {
