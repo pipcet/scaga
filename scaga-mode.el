@@ -1,5 +1,4 @@
 (defvar scaga-timer nil)
-(defvar scaga-next nil)
 
 (defun scaga-process-summary ()
   (let (ret)
@@ -55,31 +54,110 @@
            (buffer-substring (point) (save-excursion (forward-line 21) (point))))))
     (insert (propertize excerpt 'face '(:background "#ffffcc"))))))
 
+(defun scaga-range-to-path-ranges (beg end)
+  (setq beg (previous-single-property-change beg 'scaga-pattern-string
+                                             (current-buffer) (point-min)))
+  (setq end (next-single-property-change (1- end) 'scaga-pattern-string
+                                         (current-buffer) (point-max)))
+  (let ((pos0 beg)
+        ranges pos1)
+    (while (and pos0
+                (< (setq pos1 (next-single-property-change pos0 'scaga-pattern-string
+                                                           (current-buffer) end))
+                   end))
+      (if (get-text-property pos0 'scaga-pattern-string)
+          (push (cons pos0 pos1) ranges))
+      (setq pos0 pos1))
+    ranges))
+
+(defun scaga-highlight-region-path (beg end)
+  (interactive "r")
+  (let ((ranges (scaga-range-to-path-ranges beg end))
+        overlays)
+    (dolist (range ranges)
+      (let ((pos0 (car range))
+            (pos1 (cdr range)))
+        (push (make-overlay pos0 pos1) overlays)))
+    (dolist (o overlays)
+      (overlay-put o 'face `(:background "#ccffcc" :weight bold)))
+    `(lambda () (dolist (o ',overlays)
+                  (delete-overlay o)))))
+
+(defun scaga-region-to-path (beg end)
+  "Convert the current region to a path."
+  (interactive "r")
+  (let ((ranges (scaga-range-to-path-ranges beg end))
+        patterns)
+    (dolist (range ranges)
+      (let ((pattern (get-text-property (car range) 'scaga-pattern)))
+        (push pattern patterns)))
+    patterns))
+
+(defun scaga-pattern-to-pattern-string (pattern)
+  (mapconcat #'identity pattern " = "))
+
+(defun scaga-path-to-path-string (path)
+  (mapconcat #'scaga-pattern-to-pattern-string path " > "))
+
+(defun scaga-region-to-path-string (beg end)
+  "Convert the current region to a path."
+  (interactive "r")
+  (scaga-path-to-path-string (scaga-region-to-path beg end)))
+
+(defun scaga-point-to-path-range (point)
+  (let ((beg (previous-single-property-change (point) 'scaga-path))
+        (end (next-single-property-change (point) 'scaga-path)))
+    (list (cons beg end))))
+
+(defun scaga-v-command (beg end)
+  "Verify the selected call path is actually possible."
+  (interactive "r")
+  (when (use-region-p)
+    (scaga-verify (scaga-region-to-path beg end))))
+
+(defun scaga-x-command (beg end)
+  "Delete data at point (WIP: or in region.)"
+  (interactive "r")
+  (if (use-region-p)
+      nil
+    (let ((q (get-char-property (point) 'scaga-q)))
+      (when q
+        (setq scaga-queue (delq q scaga-queue))
+        (scaga-insert-queue)))))
+
+(defun scaga-add-rule (kind rule-string)
+  (with-current-buffer scaga-rules-buffer
+    (save-excursion)
+    (goto-char (point-max))
+    (insert kind " := " rule-string "\n")
+    (save-buffer))
+  (unless (equal kind "lto:unknown")
+    (scaga-queue-q (cons "--reread-rules" "refresh rules"))))
+
 (defun scaga-r-command (beg end)
   "Create a new rule covering the selected region."
   (interactive "r")
   (when (or (not (use-region-p))
             (= beg end))
-    (setq beg (save-excursion (beginning-of-line) (point))
-          end (save-excursion (end-of-line) (point))))
-  (let* ((path (scaga-region-to-path beg end))
-         (comment (read-from-minibuffer (concat "Comment for rule " path ": "))))
-    (with-current-buffer scaga-rules-buffer
-      (save-excursion)
-      (goto-char (point-max))
-      (when comment
-        (insert "# " comment "\n"))
-      (insert path "\n")
-      (save-buffer))))
+    (let ((ranges (scaga-point-to-path-range (point))))
+      (when ranges
+        (setq beg (caar ranges)
+              end (cdar ranges)))))
+  (let ((cleanup (scaga-highlight-region-path beg end)))
+    (unwind-protect
+        (let* ((path (scaga-region-to-path-string beg end))
+               (comment (read-from-minibuffer (concat "Keyword for rule " path ": "))))
+          (scaga-add-rule comment path))
+      (funcall cleanup))))
 
 (defun scaga-delete-excerpt (excerpt)
-      (when excerpt
-        (delete-region (caar excerpt) (cdar excerpt))
-        (remove-text-properties (or (previous-single-property-change (point) 'scaga-excerpt)
-                                    (point-min))
-                                (or (next-single-property-change (point) 'scaga-excerpt)
-                                    (point-max))
-                                '(scaga-excerpt nil))))
+  (when excerpt
+    (delete-region (caar excerpt) (cdar excerpt))
+    (remove-text-properties (or (previous-single-property-change (point) 'scaga-excerpt)
+                                (point-min))
+                            (or (next-single-property-change (point) 'scaga-excerpt)
+                                (point-max))
+                            '(scaga-excerpt nil))))
 
 (defun scaga-excerpt-beg (type)
   (cond
@@ -92,7 +170,7 @@
 (defun scaga-excerpt-end (type)
   (cond
    ((numberp type)
-    (forward-line type))
+    (forward-line (1+ type)))
    ((eq type 'defun)
     (end-of-defun)))
   (point))
@@ -126,6 +204,7 @@
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
          (excerpt (get-text-property (point) 'scaga-excerpt))
+         (inhibit-read-only t)
          (lines (1+ (or (and (numberp (cadr excerpt)) (cadr excerpt)) 4))))
     (when flc
       (scaga-delete-excerpt excerpt)
@@ -136,6 +215,7 @@
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
          (excerpt (get-text-property (point) 'scaga-excerpt))
+         (inhibit-read-only t)
          (lines (1- (or (and (numberp (cadr excerpt)) (cadr excerpt)) 4))))
     (when flc
       (scaga-delete-excerpt excerpt)
@@ -145,57 +225,201 @@
   "Display entire defun at point."
   (interactive)
   (let* ((flc (get-text-property (point) 'scaga-flc))
-         (excerpt (get-text-property (point) 'scaga-excerpt)))
+         (excerpt (get-text-property (point) 'scaga-excerpt))
+         (inhibit-read-only t))
+    (scaga-delete-excerpt excerpt)
     (when flc
-      (scaga-delete-excerpt excerpt)
       (unless excerpt
         (scaga-create-excerpt 'defun)))))
+
+(defun scaga-queue-q (q)
+  (setq scaga-queue (nconc scaga-queue (list q)))
+  (scaga-insert-queue))
 
 (defun scaga-l-command ()
   "Rerun current iteration."
   (interactive)
-  (setq scaga-next "--next=retry"))
+  (scaga-queue-q (cons "--next=retry"
+                       "Repeat iteration")))
 
 (defun scaga-L-command ()
   "Rerun loop from iteration 1."
   (interactive)
-  (setq scaga-next "--next=rules-loop"))
+  (scaga-queue-q (cons "--next=retry"
+                       "Repeat loop")))
 
-(defun scaga-tab-command ()
-  "Show source code for defun at point or hide it."
-  (interactive)
-  (let ((flc (get-text-property (point) 'scaga-flc))
-        (excerpt (get-text-property (point) 'scaga-excerpt)))
-    (when flc
-      (if excerpt
-          (scaga-delete-excerpt excerpt)
-        (scaga-create-excerpt 5)))))
+(defun scaga-tab-command (arg)
+  "Show source code for defun at point or hide it, or skip to the next widget button."
+  (interactive "p")
+  (if (get-char-property (point) 'button)
+      (widget-forward arg)
+    (let ((flc (get-text-property (point) 'scaga-flc))
+          (excerpt (get-text-property (point) 'scaga-excerpt))
+          (inhibit-read-only t))
+      (when flc
+        (if excerpt
+            (scaga-delete-excerpt excerpt)
+          (scaga-create-excerpt 5))))))
 
 (defun scaga-ret-command ()
-  "Visit the defun at point."
+  "Visit the defun at point, or activate a widget button."
   (interactive)
-  (let ((flc (get-text-property (point) 'scaga-flc))
-        (excerpt (get-text-property (point) 'scaga-excerpt)))
-    (when flc
-      (let* ((filename (car flc))
-             (lineno (cadr flc))
-             (buffer (find-file filename)))
-        (when buffer
-          (goto-line lineno))))))
+  (if (get-char-property (point) 'button)
+      (widget-button-press (point))
+    (let ((flc (get-text-property (point) 'scaga-flc))
+          (excerpt (get-text-property (point) 'scaga-excerpt)))
+      (when flc
+        (let* ((filename (car flc))
+               (lineno (cadr flc))
+               (buffer (find-file filename)))
+          (when buffer
+            (goto-line lineno)))))))
 
-(defun scaga-region-to-path (beg end)
-  "Convert the current region to a path."
-  (interactive "r")
-  (let ((next beg)
-        patterns patterns2)
-    (while (< next (1- end))
-      (goto-char next)
-      (push (get-text-property next 'scaga-pattern) patterns)
-      (setq next (next-single-property-change next 'scaga-pattern (current-buffer) (1- end))))
-    (dolist (pattern patterns)
-      (when pattern
-        (push pattern patterns2)))
-    (message (mapconcat #'identity patterns2 " > "))))
+(defun scaga-set-busy (q)
+  (let ((busy (cdr (assq 'busy scaga-markers)))
+        (after-busy (cdr (assq 'queue scaga-markers)))
+        (inhibit-read-only t))
+    (save-excursion
+      (goto-char busy)
+      (let ((beg (point)))
+        (insert "Current operation: ")
+        (if (functionp (cdr q))
+            (funcall (cdr q))
+          (insert (cdr q)))
+        (insert "\n")
+        (put-text-property beg (point) 'scaga-q q))
+      (delete-region (point) after-busy))))
+
+(defun scaga-insert-queue ()
+  (let ((queue (cdr (assq 'queue scaga-markers)))
+        (after-queue (cdr (assq 'after-queue scaga-markers)))
+        (inhibit-read-only t))
+    (save-excursion
+      (goto-char queue)
+      (insert "Queue:")
+      (if (null scaga-queue)
+          (insert " empty\n\n")
+        (insert "\n")
+        (dolist (q scaga-queue)
+          (let ((beg (point)))
+            (if (functionp (cdr q))
+                (funcall (cdr q))
+              (insert (cdr q) "\n"))
+            (put-text-property beg (point) 'scaga-q q))))
+      (delete-region (point) after-queue))))
+
+(defun scaga-verify (path)
+  (let ((q (cons (concat "lto := " (scaga-path-to-path-string path))
+                 `(lambda () (insert "verify\n") (scaga-insert-path ',path '(:background "#ccffff"))))))
+    (scaga-queue-q q)))
+
+(defun scaga-path-style (kind)
+  (cond
+   ((equal kind "baddie")
+    `(:background "#ccccff"))
+   ((equal kind "lto")
+    `(:background "#cccccc"))
+   ((equal kind "lto:unknown")
+    `(:background "#cccccc"))
+   ((equal kind "lto:noreturn")
+    `(:background "#ffcccc"))
+   ((equal kind "lto:impossible")
+    `(:background "#ffccff"))))
+
+;; path is a list of patterns which are lists of components
+(defun scaga-insert-path (path &optional style)
+  (let ((beg (point))
+        lines)
+    (dolist (pattern path)
+      (let ((line "")
+            filename lineno colno new-pattern)
+        (dolist (component pattern)
+          (cond
+           ((string-match "^FLC:\\(.*?\\):\\(.*?\\):\\(.*?\\)$" component)
+            (setq filename (concat scaga-source "/" (match-string 1 component)))
+            (setq lineno (string-to-number (match-string 2 component)))
+            (setq colno (string-to-number (match-string 3 component))))
+           ((string-match "^component:" component)
+            (push component new-pattern))
+           ((string-match "^intype:" component)
+            t)
+           ((string-match "^/" component)
+            t)
+           ((string-match "^'" component)
+            t)
+           ((string-match "0x" component)
+            t)
+           (t
+            (push component new-pattern))))
+        (setq line (propertize
+                    (mapconcat #'identity new-pattern " = ")
+                    'scaga-pattern pattern
+                    'scaga-pattern-string (mapconcat #'identity pattern " = ")
+                    'scaga-flc `(,filename ,lineno ,colno)
+                    'face (or style `(:background "#ccccff"))))
+        (push line lines)))
+    (dolist (line (nreverse lines))
+      (insert line)
+      (insert "\n"))
+    (put-text-property beg (point) 'scaga-path path)))
+
+(defun scaga-string-to-path (string)
+  (let* ((pattern-strings (split-string string " > "))
+         patterns)
+    (dolist (pattern-string (split-string string " > "))
+      (let (pattern)
+        (dolist (component (split-string pattern-string " = "))
+          (push component pattern))
+        (setq pattern (nreverse pattern))
+        (push pattern patterns)))
+    (setq patterns (nreverse patterns))
+    patterns))
+
+(defun scaga-loopback ()
+  (goto-char (cdr (assq 'clearable scaga-markers)))
+  (let ((beg (point))
+        beg-path end-path end path)
+    (when (looking-at-p "^baddie:$")
+      (forward-line)
+      (setq beg-path (point))
+      (re-search-forward "^$" nil t)
+      (setq end (point))
+      (backward-line)
+      (setq end-path (point))
+      (setq path (scaga-region-to-path beg-path end-path))
+      (delete-region beg end)
+      (scaga-verify path))))
+
+(defun scaga-filter-path-components (path re)
+  (mapcar (lambda (pattern)
+            (cl-remove-if (lambda (component)
+                            (string-match-p re component))
+                          pattern))
+          path))
+
+(defun scaga-incoming-rule (kind path-in &optional path-out)
+  (goto-char (point-max))
+  (insert kind ":\n")
+  (scaga-insert-path path-in (scaga-path-style kind))
+  (when path-out
+    (insert "=>\n")
+    (scaga-insert-path path-out (scaga-path-style kind)))
+  (cond
+   ((and scaga-lto-mode (equal kind "baddie"))
+    (scaga-verify path-in))
+   ((string-match-p "^lto:" kind)
+    (let ((fpath (scaga-filter-path-components path-in "^\\(FLC:\\|'\\|{\\)")))
+      (scaga-add-rule kind (scaga-path-to-path-string fpath))))))
+
+(defun scaga-incoming-line (line)
+  (if (or (string-match "^\\(.*?\\) := \\(.*\\) => \\(.*\\)$" line)
+          (string-match "^\\(.*?\\) := \\(.*\\)\\(\\)$" line))
+      (let* ((kind (match-string 1 line))
+             (path-in-string (match-string 2 line))
+             (path-out-string (match-string 3 line))
+             (path-in (scaga-string-to-path path-in-string))
+             (path-out (if (equal path-out-string "") nil (scaga-string-to-path path-out-string))))
+        (scaga-incoming-rule kind path-in path-out))))
 
 (defun scaga-update (buffer)
   "Automated update function run when there is new SCAGA process output."
@@ -206,7 +430,7 @@
           (process-buffer scaga-process))
       (save-excursion
         (goto-char 1)
-        (when (looking-at-p ".*\n[^!]")
+        (while (looking-at-p ".*\n[^!]")
           (re-search-forward "\n")
           (delete-region 1 (point)))
         (while (looking-at-p (concat ".*"
@@ -216,77 +440,38 @@
                                      "\n"))
           (save-match-data
             (re-search-forward (concat "^"
-                                       "\\(.*\\)"
+                                       "\\(.*?\\)"
                                        "\n"
                                        "!!!sequence: "
                                        (regexp-quote (number-to-string scaga-sequence))
                                        "\n")
                                nil t)
             (incf scaga-sequence)
-            (let* ((line (match-string 1))
-                   (patterns (split-string line " > "))
-                   after-line new-components lines
-                   filename lineno colno)
-              (if (= (length patterns) 1)
-                  (with-current-buffer buffer
-                    (save-excursion
-                      (goto-char (point-max))
-                      (let ((inhibit-read-only t))
-                        (insert (propertize line
-                                            'face `(:background "#888888")))
-                        (insert "\n"))))
-                (dolist (pattern patterns)
-                  (setq new-components nil)
-                  (dolist (component (split-string pattern " = "))
-                    (cond
-                     ((string-match "^FLC:\\(.*?\\):\\(.*?\\):\\(.*?\\)$" component)
-                      (setq filename (concat scaga-source "/" (match-string 1 component)))
-                      (setq lineno (string-to-number (match-string 2 component)))
-                      (setq colno (string-to-number (match-string 3 component))))
-                     ((string-match "^component:" component)
-                      (push component new-components))
-                     ((string-match "^intype:" component)
-                      t)
-                     ((string-match "^/" component)
-                      t)
-                     ((string-match "^'" component)
-                      t)
-                     ((string-match "0x" component)
-                      t)
-                     (t
-                      (push component new-components))))
-                  (push (propertize
-                         (mapconcat #'identity (nreverse new-components) " = ")
-                         'scaga-pattern
-                         (mapconcat #'identity (nreverse new-components) " = ")
-                         'scaga-flc
-                         `(,filename ,lineno ,colno)
-                         'face
-                         `(:background "#ccccff"))
-                        lines)
-                  (with-current-buffer buffer
-                    (save-excursion
-                      (goto-char (point-max))
-                      (let ((inhibit-read-only t))
-                        (dolist (line lines)
-                          (insert line)
-                          (insert "\n"))
-                        (setq lines nil)
-                        (dolist (f after-line)
-                          (funcall f))))))
-                (when (process-live-p scaga-process)
-                  (process-send-string scaga-process (concat (or scaga-next "--next") "\n")))
-                (setq scaga-next nil)
-                (with-current-buffer buffer
-                  (save-excursion
-                    (goto-char (point-max))
-                    (let ((inhibit-read-only t))
-                      (insert "\n")))))
-              (delete-region 1 (point)))))))))
+            (let ((line (match-string 1)))
+              (with-current-buffer buffer
+                (save-excursion
+                  (let ((inhibit-read-only t))
+                    (scaga-incoming-line line)))))
+            (if (and scaga-altlb-mode (= (mod scaga-sequence 2) 0))
+                (scaga-loopback))
+            (with-current-buffer buffer
+              (when (process-live-p scaga-process)
+                (let ((q (cons "--next" "automatic operation")))
+                  (when scaga-queue
+                    (setq q (car scaga-queue))
+                    (setq scaga-queue (cdr scaga-queue)))
+                  (process-send-string scaga-process (concat (car q) "\n"))
+                  (scaga-set-busy q)
+                  (scaga-insert-queue))))
+            (with-current-buffer buffer
+              (save-excursion
+                (goto-char (point-max))
+                (let ((inhibit-read-only t))
+                  (insert "\n")))))
+          (delete-region 1 (point)))))))
 
 (define-derived-mode scaga-mode special-mode "SCAGA"
   "SCAGA mode, see https://github.com/pipcet/scaga"
-  (setq buffer-read-only nil)
   t)
 
 (define-key scaga-mode-map (kbd "TAB") #'scaga-tab-command)
@@ -298,12 +483,14 @@
 (define-key scaga-mode-map (kbd "R") #'scaga-restart)
 (define-key scaga-mode-map (kbd "l") #'scaga-l-command)
 (define-key scaga-mode-map (kbd "L") #'scaga-L-command)
+(define-key scaga-mode-map (kbd "v") #'scaga-v-command)
+(define-key scaga-mode-map (kbd "V") #'scaga-V-command)
+(define-key scaga-mode-map (kbd "x") #'scaga-x-command)
 
 (defun scaga-restart ()
   (interactive)
   (when (process-live-p scaga-process)
     (ignore-errors (kill-process scaga-process)))
-  (setq buffer-read-only nil)
   (when (buffer-live-p (process-buffer scaga-process))
     (with-current-buffer (process-buffer scaga-process)
       (delete-region (point-min) (point-max))))
@@ -315,14 +502,20 @@
 (defvar scaga-rules-dir nil "Path to SCAGA rules files")
 (defvar scaga-cc nil)
 (defvar scaga-lto nil)
+(defvar scaga-lto-mode nil)
+(defvar scaga-altlb-mode nil)
 (defvar scaga-loop-forever nil)
+(defvar scaga-use-nytprof nil)
 (defvar scaga-ignore-noreturn nil)
+(defvar scaga-markers nil)
+(defvar scaga-queue nil)
 
 (defvar scaga-sequence nil "Sequence number of next expected SCAGA reply.")
 
 (defun scaga-args ()
   (let (args)
     (push "perl" args)
+    (if scaga-use-nytprof (push "-d:NYTProf" args))
     (push scaga-path args)
     (push (concat "--executable=" scaga-exec) args)
     (push (concat "--cc=" scaga-cc) args)
@@ -345,6 +538,8 @@
   (let ((buffer (get-buffer-create "*SCAGA*"))
         args)
     (with-current-buffer buffer
+      (if scaga-timer
+          (cancel-timer scaga-timer))
       (scaga-mode)
       (set (make-local-variable 'scaga-path) "/home/pip/git/scaga/scaga-extend.pl")
       (set (make-local-variable 'scaga-exec) "/usr/local/bin/emacs")
@@ -354,9 +549,13 @@
       (set (make-local-variable 'scaga-lto) "/usr/lib/gcc/x86_64-linux-gnu/5.2.1/lto1 -S -ggdb3 -O3 -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -ffunction-sections -flto -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans")
       (set (make-local-variable 'scaga-rules-dir) "/home/pip/git/scaga")
       (set (make-local-variable 'scaga-ignore-noreturn) t)
+      (set (make-local-variable 'scaga-lto-mode) nil)
+      (set (make-local-variable 'scaga-altlb-mode) nil)
       (set (make-local-variable 'scaga-loop-forever) t)
+      (set (make-local-variable 'scaga-use-nytprof) nil)
       (set (make-local-variable 'scaga-rules) nil)
       (set (make-local-variable 'scaga-calls) nil)
+      (set (make-local-variable 'scaga-markers) nil)
       (if scaga-timer
           (cancel-timer scaga-timer))
       (make-local-variable 'scaga-timer)
@@ -364,8 +563,7 @@
           (cancel-timer scaga-timer))
       (setq scaga-timer (run-with-timer 0 .5 #'scaga-update (current-buffer)))
       (set (make-local-variable 'scaga-args) args)
-      (scaga-widgets)
-      )
+      (scaga-widgets))
     (pop-to-buffer buffer)))
 
 (require 'wid-edit)
@@ -373,57 +571,120 @@
 
 (defvar scaga-widgets nil)
 (defun scaga-widgets ()
-  (erase-buffer)
-  (remove-overlays)
-  (widget-insert "Arguments:\n")
-  (setq scaga-widgets nil)
-  (push (cons 'scaga-path
-              (widget-create 'editable-field :format "SCAGA:            %v"
-                             scaga-path))
-        scaga-widgets)
-  (push (cons 'scaga-rules-dir
-              (widget-create 'editable-field :format "rules directory:  %v"
-                             scaga-rules-dir))
-        scaga-widgets)
-  (push (cons 'scaga-cc
-              (widget-create 'editable-field :format "CC:               %v"
-                             scaga-cc))
-        scaga-widgets)
-  (push (cons 'scaga-lto
-              (widget-create 'editable-field :format "LTO:              %v"
-                             scaga-lto))
-        scaga-widgets)
-  (push (cons 'scaga-source
-              (widget-create 'editable-field :format "source directory: %v"
-                             scaga-source))
-        scaga-widgets)
-  (push (cons 'scaga-exec
-              (widget-create 'editable-field :format "executable:       %v"
-                             scaga-exec))
-        scaga-widgets)
-  (push (cons 'scaga-ignore-noreturn
-              (widget-create 'checkbox
-                             scaga-ignore-noreturn))
-        scaga-widgets)
-  (widget-insert " ignore noreturn code paths\n")
-  (push (cons 'scaga-loop-forever
-              (widget-create 'checkbox
-                             scaga-loop-forever))
-        scaga-widgets)
-  (widget-insert " loop forever\n")
-  (push (cons 'restart
-              (widget-create 'push-button
-                             :notify (lambda (&rest ignore)
-                                       (dolist (pair scaga-widgets)
-                                         (set (car pair) (widget-value (cdr pair))))
-                                       (scaga-restart))
-                             "Start SCAGA"))
-        scaga-widgets)
-  (widget-insert "\n")
-  (setq buffer-read-only nil)
-  (widget-setup)
-  (scaga-mode)
-  (setq buffer-read-only nil))
+  (let ((beg (point))
+        (inhibit-read-only t))
+    (erase-buffer)
+    (remove-overlays)
+    (widget-insert "Arguments:\n")
+    (setq scaga-widgets nil)
+    (push (cons 'scaga-path
+                (widget-create 'editable-field :format "SCAGA:            %v"
+                               scaga-path))
+          scaga-widgets)
+    (push (cons 'scaga-rules-dir
+                (widget-create 'editable-field :format "rules directory:  %v"
+                               scaga-rules-dir))
+          scaga-widgets)
+    (push (cons 'scaga-cc
+                (widget-create 'editable-field :format "CC:               %v"
+                               scaga-cc))
+          scaga-widgets)
+    (push (cons 'scaga-lto
+                (widget-create 'editable-field :format "LTO:              %v"
+                               scaga-lto))
+          scaga-widgets)
+    (push (cons 'scaga-source
+                (widget-create 'editable-field :format "source directory: %v"
+                               scaga-source))
+          scaga-widgets)
+    (push (cons 'scaga-exec
+                (widget-create 'editable-field :format "executable:       %v"
+                               scaga-exec))
+          scaga-widgets)
+    (push (cons 'scaga-ignore-noreturn
+                (widget-create 'checkbox
+                               scaga-ignore-noreturn))
+          scaga-widgets)
+    (widget-insert " ignore noreturn code paths\n")
+    (push (cons 'scaga-loop-forever
+                (widget-create 'checkbox
+                               scaga-loop-forever))
+          scaga-widgets)
+    (widget-insert " loop forever\n")
+    (push (cons 'scaga-use-nytprof
+                (widget-create 'checkbox
+                               scaga-use-nytprof))
+          scaga-widgets)
+    (widget-insert " use NYTProf\n")
+    (push (cons nil
+                (widget-create 'push-button
+                               :notify (lambda (&rest ignore)
+                                         (dolist (pair scaga-widgets)
+                                           (when (car pair)
+                                             (set (car pair) (widget-value (cdr pair)))))
+                                         (scaga-restart))
+                               "Start"))
+          scaga-widgets)
+    (widget-insert " ")
+    (push (cons nil
+                (widget-create 'push-button
+                               :notify (lambda (&rest ignore)
+                                         (when (process-live-p scaga-process)
+                                           (ignore-errors
+                                             (kill-process scaga-process))))
+                               "Kill"))
+          scaga-widgets)
+    (widget-insert " ")
+    (push (cons nil
+                (widget-create 'push-button
+                               :notify (lambda (&rest ignore)
+                                         (when (process-live-p scaga-process)
+                                           (if (eq (process-status scaga-process)
+                                                   'stop)
+                                               (continue-process scaga-process)
+                                             (signal-process scaga-process 'SIGSTOP))
+                                           (scaga-process-status)))
+                               "Stop"))
+          scaga-widgets)
+    (widget-insert " ")
+    (push (cons nil
+                (widget-create 'push-button
+                               :notify (lambda (&rest ignore)
+                                         (let ((beg (cdr (assq 'clearable scaga-markers)))
+                                               (end (point-max))
+                                               (inhibit-read-only t))
+                                           (when (and beg end)
+                                             (delete-region beg end))))
+                               "Clear"))
+          scaga-widgets)
+    (widget-insert "\n")
+    (push (cons 'scaga-lto-mode
+                (widget-create 'checkbox
+                               :notify (lambda (widget &rest ignore)
+                                         (let ((pair (rassq widget scaga-widgets)))
+                                           (set (car pair) (widget-value (cdr pair)))))
+                               scaga-lto-mode))
+          scaga-widgets)
+    (widget-insert " LTO mode")
+    (widget-insert "\n")
+    (push (cons 'scaga-altlb-mode
+                (widget-create 'checkbox
+                               :notify (lambda (widget &rest ignore)
+                                         (let ((pair (rassq widget scaga-widgets)))
+                                           (set (car pair) (widget-value (cdr pair)))))
+                               scaga-altlb-mode))
+          scaga-widgets)
+    (widget-insert " alternating loopback mode")
+    (widget-insert "\n")
+    (widget-setup)
+    (push (cons 'process-status (copy-marker (point-marker) nil)) scaga-markers)
     (insert "Process status: not started\n")
+    (push (cons 'after-process-status (copy-marker (point-marker) nil)) scaga-markers)
+    (push (cons 'busy (copy-marker (point-marker) nil)) scaga-markers)
+    (insert "Current operation: none\n")
+    (push (cons 'queue (copy-marker (point-marker) nil)) scaga-markers)
+    (insert "Queue: empty\n")
+    (push (cons 'after-queue (copy-marker (point-marker) nil)) scaga-markers)
+    (push (cons 'clearable (copy-marker (point-marker) nil)) scaga-markers)))
 
 (provide 'scaga-mode)
