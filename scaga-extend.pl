@@ -703,7 +703,7 @@ sub baddie {
             my $j = $i + $l;
             next if $j > $n;
             my $subpath = $path->slice($i, $j);
-            my $ret = lto_experiment($subpath, $scaga, $scaga1);
+            my $ret = 'unknown'; # lto_experiment($subpath, $scaga, $scaga1);
 
             if ($ret eq 'unknown') {
                 lto_print "lto:unknown := " . $subpath->repr;
@@ -823,7 +823,7 @@ while ($loop_rules--) {
                 my $bres = path_expansions($path, $scaga, $param);
                 if (@$bres != 1 and
                     !baddie($path, $scaga, $scaga1)) {
-                    print $path->repr . "\n";
+                    print "baddie := " . $path->repr . "\n";
                     while ($do_wait_for_next) {
                         print "!!!sequence: " . $gsequence++ . "\n";
                         my $command = <STDIN>;
@@ -833,11 +833,13 @@ while ($loop_rules--) {
                         next path if $command eq "--next";
                         next retry if $command eq "--next=retry";
                         next rules_loop if $command eq "--next=rules-loop";
+                        next retry if $command eq "--reread-rules";
                         if ($command =~ /^lto := (.*)$/) {
                             my $path = Scaga::Path->new($1);
 
                             my $ret = lto_experiment($path, $scaga, $scaga1);
 
+                            print "lto:$ret := " . $path->repr . "\n";
                             if ($ret) {
                                 lto_print "lto:unknown :=  " . $path->repr;
                             } else {
