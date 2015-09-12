@@ -647,8 +647,8 @@ sub lto_experiment {
             }
         }
 
-        lto_print "lto:noreturn := " . $inpath->repr
-            if $noreturn;
+        # lto_print "lto:noreturn := " . $inpath->repr
+        #     if $noreturn;
     }
 
     my @critical_called_identifiers;
@@ -663,6 +663,10 @@ sub lto_experiment {
             for my $cline (@critlines) {
                 if (inrange($line, $cline)) {
                     warn "in range! oh no!";
+
+                    if ($called_and_returning_identifiers{$called_identifier}) {
+                        $noreturn = 0;
+                    }
 
                     return ($noreturn ? 'noreturn' : 'unknown') if $called_identifier =~ /^\*/; # indirect call
                 }
@@ -679,6 +683,8 @@ sub lto_experiment {
         for my $cci (@critical_called_identifiers) {
             my $newpath = $inpath->slice(0, $inpath->n - 1)->concat(Scaga::Path->new($cci));
             lto_print "lto:devirt := " . $inpath->repr . " => " . $newpath->repr;
+            print "lto:devirt := " . $inpath->repr . " => " . $newpath->repr . "\n";
+            print "!!!sequence: " . $gsequence++ . " more\n";
         }
     }
 
@@ -825,7 +831,7 @@ while ($loop_rules--) {
                     !baddie($path, $scaga, $scaga1)) {
                     print "baddie := " . $path->repr . "\n";
                     while ($do_wait_for_next) {
-                        print "!!!sequence: " . $gsequence++ . "\n";
+                        print "!!!sequence: " . $gsequence++ . " done\n";
                         my $command = <STDIN>;
                         chomp $command;
                         $command =~ s/\A[\n\r]*//msg;
