@@ -2,15 +2,28 @@
 
 (defun scaga-process-summary ()
   (let (ret)
-    (if (process-live-p scaga-process)
+    (if (and scaga-process (process-live-p scaga-process))
         (let* ((pid (process-id scaga-process))
                (pa (process-attributes pid))
                (rss (cdr (assq 'rss pa)))
                (state (cdr (assq 'state pa)))
-               (pcpu (cdr (assq 'pcpu pa))))
+               (pcpu (cdr (assq 'pcpu pa)))
+               (la (load-average t))
+               (la1 (car la))
+               (la5 (cadr la))
+               (la15 (caddr la)))
           (if rss (push (format "RSS: %dKB" rss) ret))
           (if state (push (format "state: %S" state) ret))
-          (if pcpu (push (format "CPU: %f%%" pcpu) ret)))
+          (if pcpu (push (format "CPU: %f%%" pcpu) ret))
+          (if la5 (push (format "load: %f" la5) ret))
+          (if (and scaga-batch-mode
+                   (equal state "R")
+                   (> la5 scaga-batch-hi))
+              (signal-process scaga-process 'SIGSTOP))
+          (if (and scaga-batch-mode
+                   (equal state "T")
+                   (< la5 scaga-batch-lo))
+              (continue-process scaga-process)))
       (push "(dead)" ret))
     (mapconcat #'identity ret " | ")))
 
@@ -492,7 +505,7 @@
 
 (defun scaga-update (buffer)
   "Automated update function run when there is new SCAGA process output."
-  (when (buffer-live-p (with-current-buffer buffer (process-buffer scaga-process)))
+  (when (buffer-live-p (with-current-buffer buffer (and scaga-process (process-buffer scaga-process))))
     (with-current-buffer
         (with-current-buffer buffer
           (scaga-process-status)
@@ -568,9 +581,9 @@
 
 (defun scaga-restart ()
   (interactive)
-  (when (process-live-p scaga-process)
+  (when (and scaga-process (process-live-p scaga-process))
     (ignore-errors (kill-process scaga-process)))
-  (when (buffer-live-p (process-buffer scaga-process))
+  (when (and scaga-process (buffer-live-p (process-buffer scaga-process)))
     (with-current-buffer (process-buffer scaga-process)
       (delete-region (point-min) (point-max))))
   (apply #'scaga-start (scaga-args)))
@@ -583,6 +596,9 @@
 (defvar scaga-rules-hash nil)
 (defvar scaga-cc nil)
 (defvar scaga-lto nil)
+(defvar scaga-batch-mode nil)
+(defvar scaga-batch-lo nil)
+(defvar scaga-batch-hi nil)
 (defvar scaga-lto-mode nil)
 (defvar scaga-altlb-mode nil)
 (defvar scaga-loop-forever nil)
@@ -591,6 +607,7 @@
 (defvar scaga-markers nil)
 (defvar scaga-queue nil)
 (defvar scaga-region-cleanup nil)
+(defvar scaga-process nil)
 
 (defvar scaga-sequence nil "Sequence number of next expected SCAGA reply.")
 
@@ -628,9 +645,12 @@
       (set (make-local-variable 'scaga-source) "/home/pip/git/emacs/src")
       (set (make-local-variable 'scaga-rules-dir) "/home/pip/git/scaga")
       (set (make-local-variable 'scaga-cc) "gcc -Demacs -I/home/pip/git/emacs/src -I/home/pip/git/emacs/lib $(pkg-config --cflags gtk+-3.0) -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -fno-optimize-sibling-calls -ffunction-sections -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -ggdb3 -O3 -c")
-      (set (make-local-variable 'scaga-lto) "/usr/lib/gcc/x86_64-linux-gnu/5.2.1/lto1 -S -ggdb3 -O3 -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -ffunction-sections -flto -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans")
+      (set (make-local-variable 'scaga-lto) "/usr/local/libexec/gcc/x86_64-pc-linux-gnu/6.0.0/lto1 -S -ggdb3 -O3 -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -ffunction-sections -flto -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans --param max-inline-recursive-depth=1 --param max-inline-recursive-depth-auto=1")
       (set (make-local-variable 'scaga-rules-dir) "/home/pip/git/scaga")
       (set (make-local-variable 'scaga-ignore-noreturn) t)
+      (set (make-local-variable 'scaga-batch-mode) nil)
+      (set (make-local-variable 'scaga-batch-lo) 2.0)
+      (set (make-local-variable 'scaga-batch-hi) 4.0)
       (set (make-local-variable 'scaga-lto-mode) nil)
       (set (make-local-variable 'scaga-altlb-mode) nil)
       (set (make-local-variable 'scaga-loop-forever) t)
@@ -760,6 +780,15 @@
                                scaga-altlb-mode))
           scaga-widgets)
     (widget-insert " alternating loopback mode")
+    (widget-insert "\n")
+    (push (cons 'scaga-batch-mode
+                (widget-create 'checkbox
+                               :notify (lambda (widget &rest ignore)
+                                         (let ((pair (rassq widget scaga-widgets)))
+                                           (set (car pair) (widget-value (cdr pair)))))
+                               scaga-batch-mode))
+          scaga-widgets)
+    (widget-insert " batch mode")
     (widget-insert "\n")
     (widget-setup)
     (push (cons 'process-status (copy-marker (point-marker) nil)) scaga-markers)
