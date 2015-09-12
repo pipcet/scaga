@@ -790,7 +790,6 @@ while ($loop_rules--) {
                 }
                 $oldpaths->{$path->short_repr($last, $keep)}->{$path->repr} = 1;
             }
-            # delete $paths->{$path->repr};
         }
         @paths = ();
 
@@ -869,33 +868,6 @@ while ($loop_rules--) {
 
         $notreallydone ||= (0 != scalar(keys %$paths));
 
-        # warn "shortening paths ..." if $verbose;
-        # for my $path (shuffle values %paths) {
-        #     my $repr = $path->short_repr($last);
-        #     unless (exists $oldpaths{$repr}) {
-        #         $oldpaths{$repr} = $path->repr;
-        #     }
-        # }
-        # warn "done. " . scalar(keys %oldpaths) . " paths, iteration " . $iteration . "." if $verbose;
-
-        # for my $hash (values %$scaga) {
-        #     for my $rules (values %$hash) {
-        #         for my $rule (@$rules) {
-        #             $usecount{$rule->repr} += $rule->{usecount};
-        #             $rule->{usecount} = 0;
-        #         }
-        #     }
-        # }
-
-        # for my $hash (values %$scaga1) {
-        #     for my $rules (values %$hash) {
-        #         for my $rule (@$rules) {
-        #             $usecount{$rule->repr} += $rule->{usecount};
-        #             $rule->{usecount} = 0;
-        #         }
-        #     }
-        # }
-
         my $fh;
         open $fh, ">rules-last-$last-iteration-$iteration.scaga";
         for my $rule (sort { $usecount{$b} <=> $usecount{$a} } keys %usecount) {
@@ -924,17 +896,5 @@ while ($loop_rules--) {
         }
 
         $iteration++;
-    }
-
-    if (0) {
-        for my $hash (values %$oldpaths) {
-            if (ref $hash) {
-                for my $path (keys %$hash) {
-                    print $path . "\n";
-                }
-            } else {
-                print $hash . "\n";
-            }
-        }
     }
 }
