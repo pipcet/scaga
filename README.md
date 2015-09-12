@@ -118,10 +118,10 @@ considered.
 
 Recursive functions:
 
-Currently, recursive functions are never inlined.  It would be
-desirable to inline them at least once, in particular if it turns out
-that the recursive code path isn't actually taken, but there appears
-to be no easy way to instruct GCC to do so.
+With GCC 5, recursive functions are never inlined.  With GCC 6, they
+can be inlined up to a limited depth. However, to make full use of
+this feature currently requires turning the GCC error when an
+always_inline function cannot be inlined into a warning.
 
 TODO:
  - syntax highlighting in scaga-mode
