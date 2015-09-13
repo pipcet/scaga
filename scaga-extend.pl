@@ -733,173 +733,255 @@ sub baddie {
     return 0;
 }
 
- rules_loop:
-while ($loop_rules--) {
-    my %usecount;
+sub extend_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my $path = Scaga::Path->new($_[0]);
+    my @calls;
+    push @calls, @{$scaga1->{call}{""}};
+    my $identifier = $path->last_identifier;
+    push @calls, @{$scaga1->{call}{$identifier}} if defined $identifier and $scaga1->{call}{$identifier};
+    for my $call (@calls) {
+        my $match_param = { lstrict => { component => 1 }};
+        my $m = $path->endmatch($call->{in}, $match_param);
+        my $n = $call->{in}->n;
 
-    my $oldpaths;
-    my $paths = {};
-    my $scaga = hash_scaga(read_scaga(@scaga_files));
-    my @paths;
-    for my $rules (values %{$scaga->{start}}) {
-        for my $rule (@$rules) {
-            push @paths, $rule->{in};
+        if ($m) {
+            my $newpath;
+
+            $newpath = $path->slice(0, $m->[0]+$n)->concat_overlapping($call->{out}, $n);
+
+            next if $newpath->cycle or !defined($newpath);
+
+            push @res, "extend := " . $newpath->repr;
         }
     }
-    for my $path (@paths) {
-        $paths->{$path->repr} = $path;
+
+    return @res;
+}
+
+sub expand_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my $path = Scaga::Path->new($_[0]);
+    next unless defined $path;
+    if ($path->cycle) {
+        next;
     }
-    my $iteration = 0;
-    my $notreallydone = 1;
- retry:
-    while($notreallydone) {
-        my $scaga = hash_scaga(read_scaga(@scaga_files));
-        my $keep = generate_keep();
-        $notreallydone = 0;
 
-        my $retry = $paths;
-        my $do_retry = 0;
-        my %oldpaths = $oldpaths ? %$oldpaths : ();
+    my @outpaths;
+    my $res = path_expansions($path, $scaga);
 
-        my %newpaths = %$paths;
-        my $newpaths = \%newpaths;
-        my @paths = values %$paths;
-        $paths = { };
+    if ($res) {
+        for my $outpath (@$res) {
+            next if $outpath->cycle;
+            push @res, "expand := " . $outpath->repr;
+        }
+    } else {
+        push @res, "expand := " . $path->repr;
+    }
 
-        for my $path (@paths) {
-            unless (exists $oldpaths->{$path->short_repr($last, $keep)}) {
-                my @calls;
-                push @calls, @{$scaga1->{call}{""}};
-                my $identifier = $path->last_identifier;
-                push @calls, @{$scaga1->{call}{$identifier}} if defined $identifier and $scaga1->{call}{$identifier};
-                for my $call (@calls) {
-                    my $match_param = { lstrict => { component => 1 }};
-                    my $m = $path->endmatch($call->{in}, $match_param);
-                    my $n = $call->{in}->n;
+    return @res;
+}
 
-                    if ($m) {
-                        my $newpath;
+sub check_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my $path = Scaga::Path->new($_[0]);
 
-                        if (0 && $path->slice($m->[0], $m->[0]+1)->match($call->{out}->slice(0, 1))) {
-                            # XXX actually merge the matching pattern.
-                            $newpath = $path->slice(0, $m->[0]+1)->concat($call->{out}->slice(1, undef));
-                        } else {
-                            $newpath = $path->slice(0, $m->[0]+$n)->concat_overlapping($call->{out}, $n);
-                        }
+    my $param = { baddie => 1 };
+    my $bres = path_expansions($path, $scaga, $param);
+    if (@$bres != 1 and
+        !baddie($path, $scaga, $scaga1)) {
+        push @res, "baddie := " . $path->repr;
+    }
 
-                        next if $newpath->cycle or !defined($newpath);
+    return @res;
+}
 
-                        $newpaths->{$newpath->repr} = $newpath;
-                        # print $newpath->repr . "\n";
-                    }
-                }
-                $oldpaths->{$path->short_repr($last, $keep)}->{$path->repr} = 1;
+sub lto_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my $path = Scaga::Path->new($_[0]);
+
+    my $ret = lto_experiment($path, $scaga, $scaga1);
+
+    push @res, "lto:$ret := " . $path->repr;
+
+    return @res;
+}
+
+sub rec1_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+
+    my @extended = extend_path($path_string, $scaga, $scaga1);
+    my @expanded;
+
+    for my $extended (@extended) {
+        $extended =~ s/^extend := //;
+
+        push @expanded, expand_path($extended, $scaga, $scaga1);
+    }
+    @extended = ();
+
+    for my $expanded (@expanded) {
+        $expanded =~ s/^expand := //;
+        push @res, check_path($expanded, $scaga, $scaga1);
+        print "expand := $expanded\n";
+        rec_path($expanded, $scaga, $scaga1);
+    }
+
+    return @res;
+}
+
+sub rec0_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my %seen;
+    my @new = ($path_string);
+    my $done = 0;
+
+    while (!$done) {
+        my @newnew;
+        $done = 1;
+
+        warn scalar(keys %seen) . " paths";
+
+        for my $path_string (@new) {
+            next if $seen{$path_string};
+            $done = 0;
+
+            my @extended = extend_path($path_string, $scaga, $scaga1);
+            my @expanded;
+
+            for my $extended (@extended) {
+                $extended =~ s/^extend := //;
+
+                push @expanded, expand_path($extended, $scaga, $scaga1);
             }
+
+            for my $expanded (@expanded) {
+                $expanded =~ s/^expand := //;
+                push @res, check_path($expanded, $scaga, $scaga1);
+                push @res, "expand := $expanded";
+                push @newnew, $expanded;
+            }
+            $seen{$path_string} = 1;
         }
-        @paths = ();
 
-        $scaga = hash_scaga(read_scaga(@scaga_files));
-        my $done = 0;
-        while (!$done) {
-            $done = 1;
+        @new = @newnew;
+    }
 
-            my @newpaths = values %$newpaths;
-            $newpaths = { };
+    return @res;
+}
 
-          path:
-            for my $path (@newpaths) {
-                next unless defined $path;
-                if ($path->cycle) {
-                    next;
-                }
+my $lasttime = 0;
+sub rec_path {
+    my ($path_string, $scaga, $scaga1) = @_;
+    my @res;
+    my %seen;
+    my @new = ($path_string);
+    my $done = 0;
 
-                my @outpaths;
-                my $res = path_expansions($path, $scaga);
+    while (!$done) {
+        my @newnew;
+        $done = 1;
 
-                if ($res) {
-                    $done = 0 if @$res > 1;
-                    for my $outpath (@$res) {
-                        next if $outpath->cycle;
-                        push @outpaths, $outpath;
+        warn scalar(keys %seen) . " paths";
+
+        for my $path_string (@new) {
+            my @identifiers = Scaga::Path->new($path_string)->identifiers;
+            my $l;
+          L:
+            for ($l = 2; $l <= $#identifiers; $l++) {
+                for my $o (reverse 0 .. ($#identifiers + 1 - $l)) {
+                    for my $i ($o .. $#identifiers - 1) {
+                        next if $scaga->{id_id}->{$identifiers[$i]}->{$identifiers[$i+1]};
+
+                        last L;
                     }
+                }
+            }
+
+            if ($l < 2) {
+                $l = $#identifiers + 1;
+            }
+            splice @identifiers, 0, $#identifiers + 1 - $l;
+            my $short_string = join(" > ", @identifiers);
+
+            next if $seen{$short_string};
+            #print "short := $path_string => $short_string\n";
+            $done = 0;
+
+            my @extended = extend_path($path_string, $scaga, $scaga1);
+            my @expanded;
+
+            for my $extended (@extended) {
+                $extended =~ s/^extend := //;
+
+                push @expanded, expand_path($extended, $scaga, $scaga1);
+            }
+
+            for my $expanded (@expanded) {
+                $expanded =~ s/^expand := //;
+                push @res, check_path($expanded, $scaga, $scaga1);
+                # push @res, "expand := $expanded";
+                if ($expanded =~ /Ffuncall/) {
+                    print "baddie := " . $expanded . "\n";
                 } else {
-                    push @outpaths, $path;
-                }
-                if (!@outpaths) {
-                    next;
-                }
-
-                my $param = { baddie => 1 };
-                my $bres = path_expansions($path, $scaga, $param);
-                if (@$bres != 1 and
-                    !baddie($path, $scaga, $scaga1)) {
-                    print "baddie := " . $path->repr . "\n";
-                    while ($do_wait_for_next) {
-                        print "!!!sequence: " . $gsequence++ . " done\n";
-                        my $command = <STDIN>;
-                        chomp $command;
-                        $command =~ s/\A[\n\r]*//msg;
-
-                        next path if $command eq "--next";
-                        next retry if $command eq "--next=retry";
-                        next rules_loop if $command eq "--next=rules-loop";
-                        next retry if $command eq "--reread-rules";
-                        if ($command =~ /^lto := (.*)$/) {
-                            my $path = Scaga::Path->new($1);
-
-                            my $ret = lto_experiment($path, $scaga, $scaga1);
-
-                            print "lto:$ret := " . $path->repr . "\n";
-                            if ($ret) {
-                                lto_print "lto:unknown :=  " . $path->repr;
-                            } else {
-                                lto_print "lto:impossible := " . $path->repr;
-                            }
-                            next;
-                        }
-                        die $command;
-                    }
-                    next;
-                }
-
-                for my $outpath (@outpaths) {
-                    unless (exists $oldpaths->{$outpath->short_repr($last, $keep)}) {
-                        $paths->{$outpath->repr} = $outpath;
-                    }
+                    push @newnew, $expanded;
                 }
             }
-        }
-        warn scalar(keys %$paths) . " new paths, " . scalar(keys %$oldpaths) . " old paths.. iteration $iteration, last $last." if $verbose;
 
-        $notreallydone ||= (0 != scalar(keys %$paths));
-
-        my $fh;
-        open $fh, ">rules-last-$last-iteration-$iteration.scaga";
-        for my $rule (sort { $usecount{$b} <=> $usecount{$a} } keys %usecount) {
-            print $fh ($usecount{$rule} . ": " . $rule . "\n");
-        }
-        close $fh;
-
-        my $fh;
-        open $fh, ">se-last-$last-iteration-$iteration.scaga";
-        for my $hash (values %$oldpaths) {
-            if (ref $hash) {
-                for my $path (keys %$hash) {
-                    print $fh $path . "\n";
-                }
-            } else {
-                print $fh $hash . "\n";
+            $seen{$short_string} = 1;
+            if (time() - $lasttime >= 60) {
+                warn scalar(keys %seen) . " paths";
+                $lasttime = time();
             }
         }
-        close $fh;
-        if ($do_retry) {
-            $paths = $retry;
-            $notreallydone = 1;
-            $oldpaths = \%oldpaths;
-            $scaga = hash_scaga(read_scaga(@scaga_files));
-            next retry;
-        }
 
-        $iteration++;
+        @new = @newnew;
+    }
+
+    return ();
+    return @res;
+}
+
+my $scaga = hash_scaga(read_scaga(@scaga_files));
+my $keep = generate_keep();
+my @res = ("init := init\n");
+
+while (1) {
+    if (@res) {
+        for my $i (0 .. $#res) {
+            print $res[$i] . "\n";
+            print "!!!sequence: " . $gsequence++ . " more\n" unless $#res == $i;
+        }
+    } else {
+        print "nop := nop\n";
+    }
+    print "!!!sequence: " . $gsequence++ . " done\n";
+    @res = ();
+    my $command = <STDIN>;
+    chomp $command;
+    $command =~ s/\A[\n\r]*//msg;
+
+    if ($command =~ /^extend := (.*)$/) {
+        @res = extend_path($1, $scaga, $scaga1);
+    } elsif ($command =~ /^expand := (.*)$/) {
+        @res = expand_path($1, $scaga, $scaga1);
+    } elsif ($command =~ /^check := (.*)?/) {
+    } elsif ($command eq "--reread-rules") {
+        $scaga = hash_scaga(read_scaga(@scaga_files));
+        $keep = generate_keep();
+    } elsif ($command =~ /^lto := (.*)$/) {
+        lto_path($1, $scaga, $scaga1);
+    } elsif ($command =~ /^rec := (.*)$/) {
+        rec_path($1, $scaga, $scaga1);
+    } elsif ($command eq "") {
+        last;
+    } else {
+        die $command;
     }
 }
