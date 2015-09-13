@@ -883,85 +883,110 @@ sub rec_path {
     my %seen;
     my @new = ($path_string);
     my $done = 0;
+    my @newnew;
+    my @out;
+    my @expanded;
+    my @extended;
 
-    while (!$done) {
-        my @newnew;
-        $done = 1;
+    my $yield;
+    my $abort;
 
-        warn scalar(keys %seen) . " paths";
+    $abort = sub {
+        undef $yield;
+        undef $abort;
+    };
 
-        for my $path_string (@new) {
-            my @identifiers = Scaga::Path->new($path_string)->identifiers;
-            my $l;
-          L:
-            for ($l = 2; $l <= $#identifiers; $l++) {
-                for my $o (reverse 0 .. ($#identifiers + 1 - $l)) {
-                    for my $i ($o .. $#identifiers - 1) {
-                        next if $scaga->{id_id}->{$identifiers[$i]}->{$identifiers[$i+1]};
-
-                        last L;
-                    }
-                }
+    $yield = sub {
+        while (1) {
+            if (@out) {
+                return [pop(@out), $yield, $abort];
             }
 
-            if ($l < 2) {
-                $l = $#identifiers + 1;
-            }
-            splice @identifiers, 0, $#identifiers + 1 - $l;
-            my $short_string = join(" > ", @identifiers);
+            if (@expanded) {
+                my $expanded = pop @expanded;
 
-            next if $seen{$short_string};
-            #print "short := $path_string => $short_string\n";
-            $done = 0;
-
-            my @extended = extend_path($path_string, $scaga, $scaga1);
-            my @expanded;
-
-            for my $extended (@extended) {
-                $extended =~ s/^extend := //;
-
-                push @expanded, expand_path($extended, $scaga, $scaga1);
-            }
-
-            for my $expanded (@expanded) {
                 $expanded =~ s/^expand := //;
-                push @res, check_path($expanded, $scaga, $scaga1);
-                # push @res, "expand := $expanded";
                 if ($expanded =~ /Ffuncall/) {
-                    print "baddie := " . $expanded . "\n";
+                    push @out, "baddie := $expanded";
                 } else {
                     push @newnew, $expanded;
                 }
+
+                next;
             }
 
-            $seen{$short_string} = 1;
-            if (time() - $lasttime >= 60) {
-                warn scalar(keys %seen) . " paths";
-                $lasttime = time();
+            if (@extended) {
+                my $extended = pop @extended;
+
+                $extended =~ s/^extend := //;
+
+                push @expanded, expand_path($extended, $scaga, $scaga1);
+
+                next;
+            }
+
+            if (@new) {
+                my $path_string = pop @new;
+                my @identifiers = Scaga::Path->new($path_string)->identifiers;
+                my $l;
+              L:
+                for ($l = 2; $l <= $#identifiers; $l++) {
+                    for my $o (reverse 0 .. ($#identifiers + 1 - $l)) {
+                        for my $i ($o .. $#identifiers - 1) {
+                            next if $scaga->{id_id}->{$identifiers[$i]}->{$identifiers[$i+1]};
+
+                            last L;
+                        }
+                    }
+                }
+
+                if ($l < 2) {
+                    $l = $#identifiers + 1;
+                }
+                splice @identifiers, 0, $#identifiers + 1 - $l;
+                my $short_string = join(" > ", @identifiers);
+
+                next if $seen{$short_string};
+                @extended = extend_path($path_string, $scaga, $scaga1);
+                $seen{$short_string} = 1;
+                $done = 0;
+                next;
+            }
+
+            if (!@new) {
+                if ($done) {
+                    undef $yield;
+                    return;
+                }
+
+                $done = 1;
+                @new = @newnew;
+
+                next;
             }
         }
+    };
 
-        @new = @newnew;
-    }
-
-    return ();
-    return @res;
+    return ["nop := nop", $yield, $abort];
 }
 
 my $scaga = hash_scaga(read_scaga(@scaga_files));
 my $keep = generate_keep();
 my @res = ("init := init\n");
 
+my @stack;
+
 while (1) {
     if (@res) {
         for my $i (0 .. $#res) {
             print $res[$i] . "\n";
-            print "!!!sequence: " . $gsequence++ . " more\n" unless $#res == $i;
+            print "!!!sequence: " . $gsequence++ . " more " . scalar(@stack) . "\n"
+                unless $#res == $i;
         }
     } else {
         print "nop := nop\n";
     }
-    print "!!!sequence: " . $gsequence++ . " done\n";
+    print "!!!sequence: " . $gsequence++ . " done " . scalar(@stack) . "\n";
     @res = ();
     my $command = <STDIN>;
     chomp $command;
@@ -976,12 +1001,44 @@ while (1) {
         $scaga = hash_scaga(read_scaga(@scaga_files));
         $keep = generate_keep();
     } elsif ($command =~ /^lto := (.*)$/) {
-        lto_path($1, $scaga, $scaga1);
+        push @res, lto_path($1, $scaga, $scaga1);
     } elsif ($command =~ /^rec := (.*)$/) {
-        rec_path($1, $scaga, $scaga1);
+        my $r = rec_path($1, $scaga, $scaga1);
+        if ($r) {
+            my ($retval, $yield, $abort) = @$r;
+            push @stack, [$gsequence, $yield, $abort];
+
+            push @res, $retval;
+        }
+    } elsif ($command eq "--abort") {
+        my $r = pop @stack;
+
+        if ($r) {
+            my ($seq, $yield, $abort) = @$r;
+
+            $abort->();
+        }
+    } elsif ($command eq "--next") {
+        my $r = pop @stack;
+
+        if ($r) {
+            my ($seq, $yield, $abort) = @$r;
+
+            my $newr = $yield->();
+            if ($newr) {
+                my ($retval, $new_yield, $new_abort) = @$newr;
+                push @stack, [$gsequence, $new_yield, $new_abort];
+
+                push @res, $retval;
+            }
+        }
     } elsif ($command eq "") {
         last;
     } else {
         die $command;
     }
 }
+
+$SIG{INT} = sub {
+    warn "already at top level.";
+};
