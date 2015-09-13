@@ -100,6 +100,9 @@ sub hash_scaga {
                 for my $identifier (@identifiers) {
                     push @{$ret->{$kind}->{$identifier}}, $rule;
                 }
+                for my $i (0 .. $#identifiers - 2) {
+                    $ret->{id_id}->{$identifiers[$i]}->{$identifiers[$i+1]} = 1;
+                }
             } else {
                 push @{$ret->{$kind}->{""}}, $rule;
             }
@@ -112,6 +115,8 @@ sub hash_scaga {
 
 my $scaga = hash_scaga(@scaga);
 my $scaga1 = hash_scaga(@scaga1);
+
+delete $scaga1->{id_id};
 
 sub path_expansions {
     my ($path, $scaga, $param) = @_;
