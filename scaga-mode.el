@@ -34,6 +34,18 @@
       (insert "Process status: " (scaga-process-summary) "  " (or status (format "%S\n" (process-status scaga-process))))
       (delete-region (point) (cdr (assq 'after-process-status scaga-markers))))))
 
+(defun scaga-process-filter (process string)
+  (when (buffer-live-p (process-buffer process))
+    (with-current-buffer (process-buffer process)
+      (let ((moving (= (point) (process-mark process))))
+        (save-excursion
+          ;; Insert the text, advancing the process marker.
+          (goto-char (process-mark process))
+          (insert string)
+          (set-marker (process-mark process) (point)))
+        (if moving (goto-char (process-mark process))))
+      (scaga-update scaga-buffer))))
+
 (defun scaga-sentinel (process status)
   (let* ((pbuffer (process-buffer process))
          (buffer (with-current-buffer pbuffer scaga-buffer)))
@@ -45,15 +57,20 @@
   (let ((pbuffer (generate-new-buffer "*scaga*"))
         (buffer (current-buffer)))
     (setq scaga-rules (list (concat scaga-rules-dir "/newrules.scaga")))
+    (setq scaga-paths (list (concat scaga-rules-dir "/paths.scaga")))
     (setq scaga-calls (list (concat scaga-rules-dir "/calls.scaga")))
     (with-current-buffer pbuffer
       (set (make-local-variable 'scaga-buffer) buffer)
       (set (make-local-variable 'scaga-sequence) 0))
     (setq scaga-rules-buffer (find-file-noselect (car scaga-rules)))
+    (setq scaga-paths-buffer (find-file-noselect (car scaga-paths)))
     (set (make-local-variable 'scaga-rules-hash) (make-hash-table :test 'equal))
+    (set (make-local-variable 'scaga-paths-hash) (make-hash-table :test 'equal))
     (scaga-fill-rules-hash)
+    (scaga-fill-paths-hash)
     (setq scaga-process (apply #'start-process "SCAGA" pbuffer args))
     (set-process-sentinel scaga-process #'scaga-sentinel)
+    (set-process-filter scaga-process #'scaga-process-filter)
     (let ((inhibit-read-only t))
       (save-excursion
         (goto-char (cdr (assq 'process-status scaga-markers)))
@@ -72,8 +89,9 @@
 (defun scaga-range-to-path-ranges (beg end)
   (setq beg (previous-single-property-change beg 'scaga-pattern-string
                                              (current-buffer) (point-min)))
-  (setq end (next-single-property-change (1- end) 'scaga-pattern-string
-                                         (current-buffer) (point-max)))
+  (if (get-text-property end 'scaga-pattern-string)
+      (setq end (next-single-property-change end 'scaga-pattern-string
+                                             (current-buffer) (point-max))))
   (let ((pos0 beg)
         ranges pos1)
     (while (and pos0
@@ -155,15 +173,34 @@
   (when (use-region-p)
     (scaga-verify (scaga-region-to-path beg end))))
 
+(defun scaga-x-at-point ()
+  (let (q rule)
+    ((setq q (get-char-property (point) 'scaga-q))
+     (let ((begq (previous-single-property-change (point) 'scaga-q))
+           (endq (next-single-property-change (point) 'scaga-q)))
+       (delete-region begq endq))
+     (setq scaga-queue (delq q scaga-queue))
+     t)
+    ((setq rule (get-char-property beg 'scaga-rule))
+     (let ((begr (previous-single-property-change (point) 'scaga-rule))
+           (endr (next-single-property-change (point) 'scaga-rule)))
+       (delete-region begr endr))
+     t)
+    (t
+     (goto-char (next-property-change (point)))
+     t)))
+
 (defun scaga-x-command (beg end)
   "Delete data at point (WIP: or in region.)"
   (interactive "r")
-  (if (use-region-p)
-      nil
-    (let ((q (get-char-property (point) 'scaga-q)))
-      (when q
-        (setq scaga-queue (delq q scaga-queue))
-        (scaga-insert-queue)))))
+  (save-excursion
+    (unless (use-region-p)
+      (setq beg (point)
+            end (1+ (point))))
+    (goto-char beg)
+    (setq end (copy-marker end))
+    (while (and (< (point) end)
+                (scaga-x-at-point)))))
 
 (defun scaga-fill-rules-hash ()
   (let ((hash scaga-rules-hash))
@@ -182,10 +219,30 @@
             (user-error "broken rules buffer")))
           (forward-line))))))
 
+(defun scaga-fill-paths-hash ()
+  (let ((hash scaga-paths-hash))
+    (with-current-buffer scaga-paths-buffer
+      (save-excursion
+        (goto-char (point-min))
+        (while (< (point) (point-max))
+          (cond
+           ((looking-at-p "^#")
+            t)
+           ((looking-at "^\\(.*?\\) := \\(.*?\\) => \\(.*?\\)\\(#.*\\)?$")
+            (puthash (match-string 2) (match-string 1) hash))
+           ((looking-at "^\\(.*?\\) := \\(.*?\\)\\(#.*\\)?$")
+            (puthash (match-string 2) (match-string 1) hash))
+           (t
+            (user-error "broken rules buffer")))
+          (forward-line))))))
+
+(defun scaga-add-path (kind path-in-string)
+  (let ((hash scaga-paths-hash))
+    (puthash path-in-string kind hash)))
+
 (defun scaga-add-rule (kind rule-in-string rule-out-string)
   (let ((hash scaga-rules-hash))
     (with-current-buffer scaga-rules-buffer
-      (save-excursion)
       (goto-char (point-max))
       (insert kind " := " rule-in-string)
       (if rule-out-string
@@ -323,6 +380,11 @@
             (scaga-delete-excerpt excerpt)
           (scaga-create-excerpt 5))))))
 
+(defun scaga-backtab-command (arg)
+  "Show source code for defun at point or hide it, or skip to the next widget button."
+  (interactive "p")
+  (scaga-tab-command (- arg)))
+
 (defun scaga-ret-command ()
   "Visit the defun at point, or activate a widget button."
   (interactive)
@@ -362,17 +424,39 @@
       (if (null scaga-queue)
           (insert " empty\n\n")
         (insert "\n")
-        (dolist (q scaga-queue)
-          (let ((beg (point)))
-            (if (functionp (cdr q))
-                (funcall (cdr q))
-              (insert (cdr q) "\n"))
-            (put-text-property beg (point) 'scaga-q q))))
+        (dotimes (i (min 10 (length scaga-queue)))
+          (let ((q (nth i scaga-queue)))
+            (let ((beg (point)))
+              (if (functionp (cdr q))
+                  (funcall (cdr q))
+                (insert (cdr q) "\n"))
+              (put-text-property beg (point) 'scaga-q q)))))
       (delete-region (point) after-queue))))
+
+(defun scaga-start-loop ()
+  (let ((q (cons (concat "expand := process_pending_signals") "starting loop")))
+    (scaga-queue-q q)))
+
+(defun scaga-expand (path)
+  (scaga-add-path "expand" (scaga-path-to-path-string path))
+  (let ((q (cons (concat "expand := " (scaga-path-to-path-string path))
+                 `(lambda () (scaga-insert-rule "expand" ',path)))))
+    (scaga-queue-q q)))
+
+(defun scaga-check (path)
+  (scaga-add-path "check" (scaga-path-to-path-string path))
+  (let ((q (cons (concat "check := " (scaga-path-to-path-string path))
+                 `(lambda () (scaga-insert-rule "check" ',path)))))
+    (scaga-queue-q q)))
+
+(defun scaga-extend (path)
+  (let ((q (cons (concat "extend := " (scaga-path-to-path-string path))
+                 `(lambda () (scaga-insert-rule "extend" ',path)))))
+    (scaga-queue-q q)))
 
 (defun scaga-verify (path)
   (let ((q (cons (concat "lto := " (scaga-path-to-path-string path))
-                 `(lambda () (insert "verify\n") (scaga-insert-path ',path '(:background "#ccffff"))))))
+                 `(lambda () (scaga-insert-rule "verify" ',path)))))
     (scaga-queue-q q)))
 
 (defun scaga-path-style (kind)
@@ -387,6 +471,15 @@
     `(:background "#ffcccc"))
    ((equal kind "lto:impossible")
     `(:background "#ffccff"))))
+
+(defun scaga-insert-rule (kind path-in &optional path-out)
+  (let ((beg (point)))
+    (insert kind ":\n")
+    (scaga-insert-path path-in (scaga-path-style kind))
+    (when path-out
+      (insert "=>\n")
+      (scaga-insert-path path-out (scaga-path-style kind)))
+    (put-text-property beg (point) 'scaga-rule (list kind path-in path-out))))
 
 ;; path is a list of patterns which are lists of components
 (defun scaga-insert-path (path &optional style)
@@ -437,7 +530,34 @@
     (setq patterns (nreverse patterns))
     patterns))
 
-(defun scaga-loopback (f)
+(defun scaga-loopback ()
+  (goto-char (cdr (assq 'clearable scaga-markers)))
+  (let ((beg (copy-marker (point-marker)))
+        beg-path end-path end path)
+    (when (looking-at-p "^\n")
+      (delete-region (point) (1+ (point)))
+      (setq beg (copy-marker (point-marker))))
+    (when (looking-at "^\\(.*?\\):$")
+      (let ((kind (match-string 1)))
+        (forward-line)
+        (setq beg-path (copy-marker (point-marker)))
+        (re-search-forward "^$" nil 1)
+        (forward-line)
+        (setq end (copy-marker (point-marker)))
+        (forward-line -1)
+        (setq end-path (copy-marker (point-marker)))
+        (setq path (scaga-region-to-path beg-path end-path))
+        (cond
+         ((equal kind "baddie")
+          (scaga-lto-one path))
+         ((equal kind "extend")
+          (scaga-expand-one path))
+         ((equal kind "expand")
+          (scaga-check-one path)))
+        (delete-region beg end)
+        t))))
+
+(defun scaga-loopback-old (f)
   (goto-char (cdr (assq 'clearable scaga-markers)))
   (let ((beg (copy-marker (point-marker)))
         beg-path end-path end path)
@@ -465,6 +585,16 @@
                           pattern))
           path))
 
+(defun scaga-expand-one (path)
+  (unless (gethash (scaga-path-to-path-string path) scaga-paths-hash)
+    (scaga-expand path)))
+
+(defun scaga-check-one (path)
+  (let ((found (gethash (scaga-path-to-path-string path) scaga-paths-hash)))
+    (unless (and found (not (equal found "expand"))))
+    (scaga-check path)
+    (scaga-extend path)))
+
 (defun scaga-lto-one (path)
   (catch 'return
     (let ((n (length path)))
@@ -480,11 +610,7 @@
 
 (defun scaga-incoming-rule (kind path-in &optional path-out)
   (goto-char (point-max))
-  (insert kind ":\n")
-  (scaga-insert-path path-in (scaga-path-style kind))
-  (when path-out
-    (insert "=>\n")
-    (scaga-insert-path path-out (scaga-path-style kind)))
+  (scaga-insert-rule kind path-in path-out)
   (cond
    ;;((and scaga-lto-mode (equal kind "baddie"))
    ;; (scaga-verify path-in))
@@ -511,8 +637,7 @@
           (scaga-process-status)
           (save-excursion
             (let ((inhibit-read-only t))
-              (if scaga-lto-mode
-                  (scaga-loopback #'scaga-lto-one))))
+              (while (scaga-loopback))))
           (process-buffer scaga-process))
       (save-excursion
         (goto-char 1)
@@ -540,33 +665,38 @@
               (with-current-buffer buffer
                 (save-excursion
                   (let ((inhibit-read-only t))
-                    (scaga-incoming-line line)
-                    (if scaga-lto-mode
-                        (scaga-loopback #'scaga-lto-one)))))
+                    (scaga-incoming-line line))))
               (unless more
-                (if (and scaga-altlb-mode (= (mod scaga-sequence 2) 0))
-                    (scaga-loopback (lambda (path) (scaga-verify path) t)))
                 (with-current-buffer buffer
                   (when (process-live-p scaga-process)
-                    (let ((q (cons "--next" "automatic operation")))
+                    (let ((q nil))
+                      (setq q (car scaga-queue))
+                      (setq scaga-queue (cdr scaga-queue))
+                      (unless q
+                        (setq q (cons "extend := process_pending_signals" "starting loop")))
+                      (process-send-string scaga-process (concat (car q) "\n"))
                       (when scaga-queue
                         (setq q (car scaga-queue))
-                        (setq scaga-queue (cdr scaga-queue)))
-                      (process-send-string scaga-process (concat (car q) "\n"))
+                        (setq scaga-queue (cdr scaga-queue))
+                        (unless q
+                          (setq q (cons "extend := process_pending_signals" "starting loop")))
+                        (process-send-string scaga-process (concat (car q) "\n")))
                       (scaga-set-busy q)
-                      (scaga-insert-queue))))))
+                      (scaga-insert-queue)))))
             (with-current-buffer buffer
               (save-excursion
                 (goto-char (point-max))
                 (let ((inhibit-read-only t))
                   (insert "\n")))))
-          (delete-region 1 (point)))))))
+          (delete-region 1 (point))))))))
 
 (define-derived-mode scaga-mode special-mode "SCAGA"
   "SCAGA mode, see https://github.com/pipcet/scaga"
   t)
 
 (define-key scaga-mode-map (kbd "TAB") #'scaga-tab-command)
+(define-key scaga-mode-map (kbd "S-TAB") #'scaga-backtab-command)
+(define-key scaga-mode-map (kbd "<backtab>") #'scaga-backtab-command)
 (define-key scaga-mode-map (kbd "RET") #'scaga-ret-command)
 (define-key scaga-mode-map (kbd "+") #'scaga-plus-command)
 (define-key scaga-mode-map (kbd "-") #'scaga-minus-command)
@@ -594,6 +724,8 @@
 (defvar scaga-rules-dir nil "Path to SCAGA rules files")
 (defvar scaga-rules-buffer nil)
 (defvar scaga-rules-hash nil)
+(defvar scaga-paths-buffer nil)
+(defvar scaga-paths-hash nil)
 (defvar scaga-cc nil)
 (defvar scaga-lto nil)
 (defvar scaga-batch-mode nil)
@@ -656,6 +788,7 @@
       (set (make-local-variable 'scaga-loop-forever) t)
       (set (make-local-variable 'scaga-use-nytprof) nil)
       (set (make-local-variable 'scaga-rules) nil)
+      (set (make-local-variable 'scaga-paths) nil)
       (set (make-local-variable 'scaga-calls) nil)
       (set (make-local-variable 'scaga-markers) nil)
       (set (make-local-variable 'scaga-region-cleanup) nil)
@@ -668,7 +801,8 @@
           (cancel-timer scaga-timer))
       (setq scaga-timer (run-with-timer 0 .5 #'scaga-update (current-buffer)))
       (set (make-local-variable 'scaga-args) args)
-      (scaga-widgets))
+      (scaga-widgets)
+      (scaga-start-loop))
     (pop-to-buffer buffer)))
 
 (require 'wid-edit)
