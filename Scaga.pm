@@ -4,6 +4,16 @@ use strict;
 package Scaga::Component;
 use Data::Dumper;
 
+sub kind {
+    my ($self) = @_;
+    my $class = ref($self) // $self;
+
+    $class =~ s/.*:://;
+    $class = lc $class;
+
+    return $class;
+}
+
 sub identifiers {
     return ();
 }
@@ -59,6 +69,58 @@ sub new {
     } else {
         return Scaga::Component::Identifier->new($string);
     }
+}
+
+sub lazy {
+    my ($class, $promise) = @_;
+
+    return Scaga::Component::Lazy->new($class, $promise);
+}
+
+package Scaga::Component::Lazy;
+use parent -norequire, 'Scaga::Component';
+
+sub new {
+    my ($class, $future_class, $promise) = @_;
+    my $self = bless { class => $future_class, promise => $promise }, $class;
+
+    return $self;
+}
+
+sub kind {
+    my ($self) = @_;
+
+    return $self->{class}->kind;
+}
+
+use Data::Dumper;
+
+sub force1 {
+    my ($self) = @_;
+
+    if (ref $self->{promise}) {
+        $self->{promise} = $self->{promise}->();
+
+        return $self;
+    } else {
+        return $self->{class}->new($self->{promise});
+    }
+}
+
+sub force {
+    my ($self) = @_;
+
+    while ($self->isa('Scaga::Component::Lazy')) {
+        $self = $self->force1;
+    }
+
+    return $self;
+}
+
+sub repr {
+    my ($self) = @_;
+
+    return $self->force->repr;
 }
 
 package Scaga::Component::RegExp;
@@ -206,6 +268,8 @@ sub repr {
 sub new {
     my ($class, $string, $output) = @_;
 
+    $string =~ s/^FLC://;
+
     return bless { flc => $string }, $class;
 }
 
@@ -253,6 +317,8 @@ sub repr {
 
 sub new {
     my ($class, $string, $output) = @_;
+
+    $string =~ s/^home://;
 
     return bless { home => $string }, $class;
 }
@@ -308,11 +374,13 @@ sub html {
 sub repr {
     my ($self) = @_;
 
-    return $self->{intype};
+    return "intype:" . $self->{intype};
 }
 
 sub new {
     my ($class, $string, $output) = @_;
+
+    $string =~ s/^intype://;
 
     return bless { intype => $string }, $class;
 }
@@ -337,11 +405,13 @@ sub html {
 sub repr {
     my ($self) = @_;
 
-    return $self->{component};
+    return "component:" . $self->{component};
 }
 
 sub new {
     my ($class, $string, $output) = @_;
+
+    $string =~ s/^component://;
 
     return bless { component => $string }, $class;
 }
@@ -349,6 +419,12 @@ sub new {
 package Scaga::Pattern;
 use HTML::Entities;
 use Data::Dumper;
+
+sub component {
+    my ($self, $kind) = @_;
+
+    return grep { $_->kind eq $kind } @{$self->{components}};
+}
 
 sub html {
     my ($self) = @_;
@@ -368,6 +444,7 @@ sub html {
 sub normalize {
     my ($self) = @_;
 
+    return;
 #    die $self->repr unless $self->match($self);
 
     my $components = $self->{components};
@@ -376,7 +453,7 @@ sub normalize {
     while (1) {
         for my $i (0 .. $#$components) {
             for my $j ($i + 1 .. $#$components) {
-                if (ref($components->[$i]) eq ref($components->[$j])) {
+                if ($components->[$i]->kind eq $components->[$j]->kind) {
                     splice @$components, $j, 1;
                     next loop;
                 }
@@ -480,28 +557,33 @@ sub new {
     my ($class, $string, $output) = @_;
     my @components;
 
-    while ($string) {
-        if ($string =~ s/^FLC:(.*?:[0-9]*:[0-9]*)//ms) {
-            push @components, Scaga::Component::FLC->new($1);
-        } elsif ($string =~ s/^home:(.*?:[0-9]*:[0-9]*)//ms) {
-            push @components, Scaga::Component::Home->new($1);
-        } elsif ($string =~ s/^(component:[^ =]*)//ms) {
-            push @components, Scaga::Component::Component->new($1);
-        } elsif ($string =~ s/^(intype:[^=]*[^ =])//ms) {
-            push @components, Scaga::Component::Intype->new($1);
-        } elsif ($string =~ s/^(\/[^\/]*\/)//ms) {
-            push @components, Scaga::Component::RegExp->new($1);
-        } elsif ($string =~ s/^'([^']*)'//ms) {
-            push @components, Scaga::Component::Codeline->new($1);
-        } elsif ($string =~ /^'/) {
-            die $string;
-        } elsif ($string =~ s/^([^=]*0x[^=]*[^ =])//ms) {
-            push @components, Scaga::Component::Value->new($1);
-        } elsif ($string =~ s/^([^=]*[^ =])//ms) {
-            push @components, Scaga::Component::Identifier->new($1);
-        }
+    if (ref $string) {
+        @components = @$string;
+    } else {
 
-        die $string unless $string eq "" or $string =~ s/^ = //ms;
+        while ($string) {
+            if ($string =~ s/^FLC:(.*?:[0-9]*:[0-9]*)//ms) {
+                push @components, Scaga::Component::FLC->new($1);
+            } elsif ($string =~ s/^home:(.*?:[0-9]*:[0-9]*)//ms) {
+                push @components, Scaga::Component::Home->new($1);
+            } elsif ($string =~ s/^(component:[^ =]*)//ms) {
+                push @components, Scaga::Component::Component->new($1);
+            } elsif ($string =~ s/^(intype:[^=]*[^ =])//ms) {
+                push @components, Scaga::Component::Intype->new($1);
+            } elsif ($string =~ s/^(\/[^\/]*\/)//ms) {
+                push @components, Scaga::Component::RegExp->new($1);
+            } elsif ($string =~ s/^'([^']*)'//ms) {
+                push @components, Scaga::Component::Codeline->new($1);
+            } elsif ($string =~ /^'/) {
+                die $string;
+            } elsif ($string =~ s/^([^=]*0x[^=]*[^ =])//ms) {
+                push @components, Scaga::Component::Value->new($1);
+            } elsif ($string =~ s/^([^=]*[^ =])//ms) {
+                push @components, Scaga::Component::Identifier->new($1);
+            }
+
+            die $string unless $string eq "" or $string =~ s/^ = //ms;
+        }
     }
 
     my $ret = bless { components => \@components }, $class;
@@ -601,7 +683,13 @@ sub match {
 sub new {
     my ($class, $string, $output) = @_;
 
-    my @patterns = split(" > ", $string);
+    my @patterns;
+
+    if (ref $string) {
+        @patterns = @$string;
+    } else {
+        @patterns = split(" > ", $string);
+    }
 
     @patterns = map { Scaga::Pattern->new($_) } @patterns;
 
@@ -738,7 +826,13 @@ sub n {
 sub new {
     my ($class, $string, $output) = @_;
 
-    my @ppaths = split(" >> ", $string);
+    my @ppaths;
+
+    if (ref $string) {
+        @ppaths = @$string;
+    } else {
+        @ppaths = split(" >> ", $string);
+    }
 
     @ppaths = map { Scaga::PPath->new($_) } @ppaths;
 

@@ -9,6 +9,7 @@ use IPC::Run qw/run new_chunker timeout start/;
 use File::Slurp qw/slurp/;
 use Getopt::Long;
 use strict;
+use Scaga;
 
 my $DEBUG = 0;
 my @cmd = ("/usr/bin/gdb");
@@ -42,10 +43,8 @@ my @handlers;
 my @calls;
 my $caller;
 my $component;
-my %functions;
 my %components;
 my %types;
-my %lineno;
 
 sub runcmd {
     my ($cmd) = @_;
@@ -156,6 +155,28 @@ sub fstrip {
     };
 }
 
+sub fstrip2 {
+    my ($f, @patterns) = @_;
+
+    return sub {
+        if (ref $f) {
+            return fstrip2($f->(), @patterns);
+        }
+
+        my $ret = $f;
+
+        for my $pattern (@patterns) {
+            unless ($ret =~ s/$pattern//msg) {
+                return undef;
+            }
+        }
+
+        die unless defined $ret;
+
+        return $ret;
+    };
+}
+
 sub p {
     my ($rip, $expr) = @_;
 
@@ -170,57 +191,33 @@ sub p {
 
         my $fret = runcmd ("if 1\np \$rip = $rip\np $expr\nend");
 
-        return fstrip($fret, '.*\$[0-9]* = ');
+        return fstrip2($fret, '.*\$[0-9]* = ');
     };
+}
+
+sub data_value {
+    my ($rip, $expr) = @_;
+
+    return p($rip, $expr);
 }
 
 my $pwd;
 chomp($pwd = `/bin/pwd`);
 
-sub register_call {
-    my ($caller, $callee, $file, $line, $col, $component, $inexpr, $type) = @_;
+my @e;
+sub e {
+    my ($kind, $path) = @_;
 
-    warn (scalar @calls) . " calls";
-
-    push @calls, { caller => $caller, callee => $callee, file => $file, line => $line, col => $col, type => $type };
-
-    my $call = $calls[$#calls];
-    my $rip = file_line_col_to_rip($file, $line, $col);
-
-    my $caller_type = function_type($rip, $caller);
-    my $callee_type = function_type($rip, $callee);
-    my $caller_id = p($rip, $caller);
-    my $callee_id = p($rip, $callee);
-    my $codeline;
-
-    $call->{caller_type} = $caller_type;
-    $call->{callee_type} = $callee_type;
-    $call->{codeline} = $codeline = grab_line($file, $line);
-    $call->{caller_id} = $caller_id;
-    $call->{callee_id} = $callee_id;
-    $call->{component} = $component;
-    $call->{inexpr} = data_type($rip, $inexpr) if $inexpr ne "";
-
-#    print "$caller_type $caller = $caller_id calls $callee_type $callee = $callee_id at $file:$line: $codeline\n";
-
-    return $calls[$#calls];
+    push @e, [$kind, $path];
 }
 
-sub register_function {
-    my ($function, $file, $line, $col, $component) = @_;
-
-    return register_call ($function, $function, $file, $line, $col, $component, undef, 'fake');
-}
-
-sub register_suggested_type {
-    my ($function, $file, $line, $col, $component, $inexpr, $type) = @_;
-
-    return register_call ($function, $function, $file, $line, $col, $component, $inexpr, $type);
+sub grab_codeline {
+    return "";
 }
 
 if ($do_symbols) {
     my $fh;
-    open $fh, "nm emacs| cut -c 20- |" or die;
+    open $fh, "nm /usr/local/bin/emacs| cut -c 20- |" or die;
     my @symbols = <$fh>;
     my %symbols;
     my %symbol_components;
@@ -259,7 +256,7 @@ if ($do_symbols) {
             if ($output =~ s/0x[0-9a-f]+ \<(.*?)\>$//ms) {
                 my ($function) = ($1);
                 for my $component (@{$symbol_components{$symbol}}) {
-                    register_suggested_type($function, "...", 0, 0, $component, $symbol, "symbol");
+                    e('type', [[Scaga::Component::Component->new($component)], [Scaga::Component::Identifier->new($function)]]);
                 }
             }
 
@@ -270,8 +267,8 @@ if ($do_symbols) {
 
 while (<>) {
     if (/^([a-zA-Z_].*?) \(/) {
-        $caller = $1;
-        $functions{$caller} = $1;
+        $caller = Scaga::Component::Identifier->new($1);
+
     }
     if (/^ *(.*?) ([a-zA-Z_.][a-zA-Z0-9_.]*);$/ or
         />>>, (.*?) ([a-zA-Z_.][a-zA-Z0-9_.]*)$/) {
@@ -285,57 +282,81 @@ while (<>) {
         $type =~ s/glyph_row_area/enum glyph_row_area/g;
         $type =~ s/([^a-zA-Z_0-9])(text_cursor_kinds|xembed_message|xembed_info|draw_glyphs_face|corners|named_merge_point_kind|font_property_index)/$1enum $2/g;
         $type =~ s/\(\*\) */\(\*\)/msg;
-        $types{$id} = $type;
+        $types{$id}{base} = Scaga::Component::Identifier->new($type);
     }
-    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <component_ref, ([a-zA-Z_.][a-zA-Z0-9_.]*), (\[(.*?):(.*?):(.*?)\] )*(\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*))[,>]/) {
-        my ($file, $line, $col, $assignee, $linespec, $file1, $line1, $col1, $expr) =
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+    if (/^ *\[(.*?:.*?:.*?)\] gimple_assign <component_ref, ([a-zA-Z_.][a-zA-Z0-9_.]*), (\[(.*?:.*?:.*?)\] )*(\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*))[,>]/) {
+        my ($flc, $id, $linespec, $flc1, $expr) =
+            (Scaga::Component::FLC->new($1), $2, $3, $4, $5);
+        my $rip = flc_to_rip($flc);
         my ($inexpr, $comp);
+        my $intype;
 
         if ($expr =~ /->/) {
             $expr =~ /^(.*?)->(.*)$/;
-            ($inexpr, $comp) = ($1, $2);
+            my $baseexpr = $1;
+            $intype = $types{$baseexpr} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            ($inexpr, $comp) = ('*('.$baseexpr.')', $2);
         } else {
             $expr =~ /^(.*)\.([^.]*)$/;
-            ($inexpr, $comp) = ($1, $2);
+            my $baseexpr = $1;
+            $intype = $types{$baseexpr} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            ($inexpr, $comp) = ($baseexpr, $2);
         }
 
         if (defined ($comp)) {
-            $components{$assignee} = [$comp, $inexpr];
+            warn "inexpr $inexpr intype $intype";
+            $types{$id}{component} = Scaga::Component::Component->new($comp);
+            $types{$id}{inexpr} = Scaga::Component::Intype->lazy($intype);
         }
     }
-    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_assign <addr_expr, (\[.*?:.*?:.*?\] )*\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*), (\[.*?:.*?:.*?\] )*([a-zA-Z_.][a-zA-Z0-9_.]*)[,>]/) {
-        my ($file, $line, $col, $dummy1, $expr, $op, $component, $dummy2, $value) =
-            ($1, $2, $3, $4, $5, $6, $7, $8, $9);
-
-        register_suggested_type($value, $file, $line, $col, $component, undef, "assign");
+    if (/^ *\[(.*?:.*?:.*?)\] gimple_assign <addr_expr, (\[.*?:.*?:.*?\] )*\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*), (\[.*?:.*?:.*?\] )*([a-zA-Z_.][a-zA-Z0-9_.]*)[,>]/) {
+        my $flc = Scaga::Component::FLC->new($1);
+        my $rip = flc_to_rip($flc);
+        my $type = Scaga::Component::Identifier->lazy(data_type($rip, $3.$4.$5));
+        my $intype = Scaga::Component::Intype->lazy(data_type($rip, $3));
+        my $component = Scaga::Component::Component->new($5);
+        my $id = Scaga::Component::Identifier->new($7);
+        my $value = Scaga::Component::Value->lazy(data_value($rip, $7));
+        e('devirt', [[$type, $component, $intype], [$id, $value]]);
     }
-    if (/^ *\[(.*?):(.*?):(.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
-        my ($file, $line, $col, $callee) = ($1, $2, $3, $4);
+    if (/^ *\[(.*?:.*?:.*?)\] gimple_assign <parm_decl, (\[.*?:.*?:.*?\] )*\**([a-zA-Z_.][\[\]a-zA-Z0-9_.]*)(->|\.)([a-zA-Z_.][a-zA-Z0-9_.]*), (\[.*?:.*?:.*?\] )*([a-zA-Z_.][a-zA-Z0-9_.]*)[,>]/) {
+        my $flc = Scaga::Component::FLC->new($1);
+        my $rip = flc_to_rip($flc);
+        my $type = Scaga::Component::Identifier->lazy(data_type($rip, $3.$4.$5));
+        my $intype = Scaga::Component::Intype->lazy(data_type($rip, $3));
+        my $component = Scaga::Component::Component->new($5);
+        e('virt', [[$type], [$type, $component, $intype]]);
+    }
+    if (/^ *\[(.*?:.*?:.*?)\] gimple_call <([a-zA-Z_.][a-zA-Z0-9_.]+)[,>]/) {
+        my ($flc, $callee) = (Scaga::Component::FLC->new($1), Scaga::Component::Identifier->new($2));
+        my $rip = flc_to_rip($flc);
+        my $value = Scaga::Component::Value->lazy(data_value($rip, $caller->repr));
+        my $callee_value = Scaga::Component::Value->lazy(data_value($rip, $callee->repr));
         my ($comp, $inexpr);
 
-        if (($callee =~ /^_/ or $callee =~ /\./) && $types{$callee}) {
-            ($comp, $inexpr) = @{$components{$callee}}
-                if $components{$callee};
-            $callee = $types{$callee};
+        if (($callee->repr =~ /^_/ or $callee->repr =~ /\./) && $types{$callee->repr}) {
+            $comp = $types{$callee->repr}{component};
+            $inexpr = $types{$callee->repr}{inexpr};
+            $callee = $types{$callee->repr}{base};
         }
 
-        $functions{$callee} = 1;
-        $lineno{$callee} = $file . ":" . $line;
-
-        # print $caller . " calls " . $callee . "\n";
-        # $callers{$callee}{$caller} = 1;
-        register_call($caller, $callee, $file, $line, $col, $comp, $inexpr, 'real');
+        e('call', [[$caller, $value, $flc], [$callee, $callee_value, $comp, $inexpr]]);
     }
-    if (/>>\[(.*?):([0-9]*?):([0-9]*)\] gimple_bind/) {
-        my ($file, $line, $col) = ($1, $2, $3);
+    if (/>>\[(.*?:[0-9]*?:[0-9]*)\] gimple_bind/) {
+        my $flc = Scaga::Component::FLC->new($1);
+        my $home = Scaga::Component::Home->new($1);
+        my $rip = flc_to_rip($flc);
+        my $type = Scaga::Component::Identifier->lazy(function_type($rip, $caller->repr));
+        my $value = Scaga::Component::Value->lazy(data_value($rip, $caller->repr));
 
-        register_function($caller, $file, $line, $col, $component);
+        e('type', [[$type], [$caller, $value]]);
+        e('home', [[$caller, $value], [$home]]);
     }
 }
 
-sub file_line_col_to_rip {
-    my ($file, $line, $col) = @_;
+sub flc_to_rip {
+    my ($flc) = @_;
+    my ($file, $line, $col) = split ":", $flc->{flc};
 
     my $fret2 = runcmd("info line $file:$line");
 
@@ -376,7 +397,7 @@ sub function_type {
         }
 
         if ($ret1 =~ /type = /ms) {
-            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), '.*\$[0-9]* = ');
+            return fstrip2(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), '.*\$[0-9]* = ');
         } else {
             return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), '.*type = ', '.*\$[0-9]*.*');
         }
@@ -393,8 +414,23 @@ sub data_type {
     }
 
     my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis ${function}\nend";
+    my $fret2 = fstrip2($fret1, '.*type = ');
 
-    return fstrip($fret1, '.*type = ');
+    my $ret;
+    $ret = sub {
+        if (ref $fret2) {
+            $fret2 = $fret2->();
+            return $ret;
+        }
+
+        $ret = undef;
+
+        if ($function eq $fret2) {
+            return $function;
+        } else {
+            return data_type($rip, $fret2);
+        }
+    };
 }
 
 sub grab_line {
@@ -420,23 +456,25 @@ sub grab_line {
     };
 }
 
-my $notdone = 1;
-while ($notdone) {
-    $notdone = 0;
-    for my $call (@calls) {
-        for my $key (keys %$call) {
-            if (ref $call->{$key}) {
-                $call->{$key} = $call->{$key}->();
-                $notdone = 1;
-            }
-        }
-    }
-    sync;
-}
-
 use Data::Dumper;
 
-warn (scalar @calls) . " calls";
-print Dumper(\@calls);
+my @paths;
+for my $e (@e) {
+    my $ekind = shift @$e;
+    my @patterns;
+    for my $epattern (@{$e->[0]}) {
+        my @components;
+
+        for my $component (@$epattern) {
+            push @components, $component if defined $component;
+        }
+
+        push @patterns, \@components;
+    }
+
+    my $path = Scaga::Path->new([\@patterns]);
+
+    print $ekind . " := " . $path->repr . "\n";
+}
 
 exit 0;
