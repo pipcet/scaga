@@ -11,7 +11,7 @@ use Getopt::Long;
 use strict;
 use Scaga;
 
-my $DEBUG = 0;
+our $DEBUG = 0;
 my @cmd = ("/usr/bin/gdb");
 
 my $do_symbols;
@@ -19,118 +19,195 @@ my $do_symbols;
 GetOptions("symbols=i" => \$do_symbols);
 
 
-my $in;
-my $out = '';
-my $in2;
-
-my $h = start(\@cmd, \$out, \$in, '2>', \$in2);
-
-my $outlog;
-open $outlog, ">outlog.txt" or die;
-
-my $inlog;
-open $inlog, ">inlog.txt" or die;
-
-my $comblog;
-open $comblog, ">comblog.txt" or die;
-
-select( ( select( $out ), $|=1 )[ 0 ] );
-
-select( ( select( $comblog ), $|=1 )[ 0 ] );
-
-my $cache = { };
-my @handlers;
-my @calls;
-my $caller;
-my $component;
-my %components;
-my %types;
+package GDBB;
+use Carp::Always;
+use IPC::Run qw/run new_chunker timeout start/;
+use strict;
 
 sub runcmd {
-    my ($cmd) = @_;
+    my ($self, $cmd, $nocache) = @_;
 
     chomp $cmd;
     $cmd .= "\n" if $cmd ne "";
 
-    return $cache->{$cmd} if defined $cache->{$cmd};
+    unless ($nocache) {
+        return $self->{cache}->{$cmd} if defined $self->{cache}->{$cmd};
+    }
 
     print STDERR "cmd: $cmd" if $DEBUG;
-    print $outlog $cmd;
-    print $comblog $cmd;
-    $out .= $cmd;
+    $self->{outlog}->print($cmd);
+    $self->{comblog}->print($cmd);
+    $self->{out} .= $cmd;
     chomp $cmd;
 
     my $ret = undef;
     my $rret = \$ret;
 
-    push @handlers, sub {
-        print STDERR "in: $in\n" if $DEBUG;
-        die $in unless $in =~ /\A(.*?)\n----\n\n(.*)/ms;
+    push @{$self->{handlers}}, sub {
+        print STDERR "in: " . $self->in . "\n" if $DEBUG;
+        die $self->in unless $self->in =~ /\A(.*?)\n----\n\n(.*)/ms;
         my ($retval, $rest) = ($1, $2);
         chomp $retval;
-        print $inlog "$cmd => $retval\n\n\n";
+        $self->{inlog}->print("$cmd => $retval\n\n\n");
         print STDERR "read: $retval\n" if $DEBUG;
         $$rret = $retval;
-        $in = $rest;
+        $self->{in} = $rest;
     };
-    warn scalar(@handlers) . " handlers" if $DEBUG;
-    warn $in2 if $in2;
-    $in2 = "";
+    warn $self->handlers . " handlers" if $DEBUG;
+    # warn $self->{in2} if $self->{in2};
+    $self->{in2} = "";
 
-    while(@handlers > 1000) {
-        pump();
-    }
-
-    pump_nb();
+    $self->pump_nb();
 
     chomp $cmd;
     $cmd .= "\n" if $cmd ne "";
 
-    return $cache->{$cmd} = sub { while (!defined($ret)) { pump(); }; return $ret; };
+    my $retval;
+    $retval = sub { while (!defined($ret)) { $self->pump(); }; undef $retval; return $ret; };
+
+    unless($nocache) {
+        $self->{cache}->{$cmd} = $retval;
+    }
+
+    return $retval;
+}
+
+sub handlers {
+    my ($self) = @_;
+
+    return scalar(@{$self->{handlers}});
+}
+
+sub handler {
+    my ($self) = @_;
+
+    return shift @{$self->{handlers}};
+}
+
+sub in {
+    my ($self) = @_;
+
+    return $self->{in};
 }
 
 sub pump_nb {
-    $h->pump_nb;
+    my ($self) = @_;
+    $self->{h}->pump_nb;
 
-    while ($in =~ /\n----\n\n/ms && @handlers) {
-        my $handler = shift @handlers;
+    while ($self->in =~ /\n----\n\n/ms && $self->handlers) {
+        my $handler = $self->handler;
         $handler->();
     }
 }
 
 sub pump {
-    while ($in =~ /\n----\n\n/ms && @handlers) {
-        my $handler = shift @handlers;
+    my ($self) = @_;
+    while ($self->in =~ /\n----\n\n/ms && $self->handlers) {
+        my $handler = $self->handler;
         $handler->();
     }
-    if (@handlers) {
-        $h->pump;
+    if ($self->handlers) {
+        $self->{h}->pump;
     } else {
-        $h->pump_nb;
+        $self->{h}->pump_nb;
     }
 }
 
 sub sync {
-    while (@handlers) {
-        pump;
-        warn scalar(@handlers) . " handlers" if $DEBUG;
+    my ($self) = @_;
+    while ($self->handlers) {
+        $self->pump;
+        warn $self->handlers . " handlers" if $DEBUG;
     }
 }
 
-# $ofh = select STDOUT; $| = 1; select $ofh;
+sub new {
+    my ($class, $cmd, %h) = @_;
+    my $self = bless {}, $class;
 
-pump_nb;
-sleep(1);
-$in = "";
-runcmd("\nset prompt \\n----\\n\\n\n\n\n");
-runcmd("");
-$cache = { };
-runcmd("");
-runcmd("echo test");
-runcmd "file emacs";
-runcmd "start";
-runcmd "set width unlimited";
-sync;
+    $self->{cache} = $h{cache} // {};
+    $self->{handlers} = [];
+    $self->{out} = "";
+    $self->{in} = "";
+    $self->{in2} = "";
+    $self->{h} = start($cmd, \$self->{out}, \$self->{in}, '2>', \$self->{in2});
+
+    my $outlog;
+    my $inlog;
+    my $comblog;
+
+    $outlog = $h{outlog} or open $outlog, ">outlog.txt" or die;
+    $inlog = $h{inlog} or open $inlog, ">inlog.txt" or die;
+    $comblog = $h{comblog} or open $comblog, ">comblog.txt" or die;
+
+    $self->{outlog} = $outlog;
+    $self->{inlog} = $inlog;
+    $self->{comblog} = $comblog;
+
+    $self->pump_nb;
+    sleep(1);
+    $self->{in} = "";
+    $self->runcmd("\nset prompt \\n----\\n\\n\n\n\n", 1);
+    $self->runcmd("", 1);
+    $self->runcmd("", 1);
+    $self->runcmd("echo test", 1);
+    $self->runcmd("file emacs", 1);
+    $self->runcmd("start", 1);
+    $self->runcmd("set width unlimited", 1);
+    $self->sync;
+
+    return $self;
+}
+
+package main;
+
+my $n_gdbb = 3;
+my @gdbb;
+
+push @gdbb, GDBB->new(\@cmd);
+while (@gdbb < $n_gdbb) {
+    push @gdbb, GDBB->new(\@cmd, cache => $gdbb[0]->{cache});
+}
+
+sub gdbb {
+    my @l = sort { $a->handlers <=> $b->handlers } @gdbb;
+
+    return $l[0];
+}
+
+sub gdbb9 {
+    my @l = sort { $a->handlers <=> $b->handlers } @gdbb;
+
+    return $l[$#l];
+}
+
+sub pump_nb {
+    for my $gdbb (@gdbb) {
+        $gdbb->pump_nb;
+    }
+
+    print STDERR join(" ", map { $_->handlers } @gdbb) . "\n";
+}
+
+sub runcmd($) {
+    my $ret = gdbb()->runcmd(@_);
+
+    pump_nb();
+    my $gdbb9 = gdbb9();
+    while($gdbb9->handlers > 1000) {
+        $gdbb9->pump();
+        $gdbb9 = gdbb9();
+        pump_nb();
+    }
+
+    return $ret;
+}
+
+my @calls;
+my $caller;
+my $component;
+my %components;
+my %types;
 
 # this parses the output of gcc -fdump-tree-gimple-vops-verbose-raw-lineno
 # (.gimple)
@@ -294,12 +371,12 @@ while (<>) {
         if ($expr =~ /->/) {
             $expr =~ /^(.*?)->(.*)$/;
             my $baseexpr = $1;
-            $intype = $types{$baseexpr} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            $intype = $types{$baseexpr}{base} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
             ($inexpr, $comp) = ('*('.$baseexpr.')', $2);
         } else {
             $expr =~ /^(.*)\.([^.]*)$/;
             my $baseexpr = $1;
-            $intype = $types{$baseexpr} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            $intype = $types{$baseexpr}{base} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
             ($inexpr, $comp) = ($baseexpr, $2);
         }
 
