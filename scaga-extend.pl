@@ -6,6 +6,7 @@ use File::Slurp qw(read_file write_file);
 use Data::Dumper;
 use List::Util qw(shuffle);
 use IPC::Run qw(start);
+use Generator;
 
 my @rules_files = ();
 my @calls_files = ();
@@ -679,7 +680,6 @@ sub lto_experiment {
     my $sh;
     my $sfile;
     my $yield;
-    my $abort;
     my $state = 0;
 
     for my $cfile (@cfiles) {
@@ -715,7 +715,7 @@ sub lto_experiment {
             }
             $sh = lto_lto1("$dir/test.s", @ofiles);
 
-            return [[], $yield, $abort];
+            return;
         } elsif ($state == 1) {
             $sh->finish or return @res;
             $sfile = "$dir/test.s";
@@ -724,7 +724,7 @@ sub lto_experiment {
                 lto_read_sfile($sfile);
 
             if (!defined $noreturn) {
-                return \@res;
+                return @res;
             }
 
             if ($called_and_returning_identifiers->{$last_identifier}) {
@@ -741,13 +741,13 @@ sub lto_experiment {
             }
 
             if ($inpath->n == 1) {
-                return \@res;
+                return @res;
             }
 
             my @critical_called_identifiers = lto_critical_identifiers($called_identifiers, \@critlines, \@critlines1);
 
             if ($critical_called_identifiers[0] eq '(*)') {
-                return \@res;
+                return @res;
             }
 
             if ($last_identifier =~ /\(\*\)/) {
@@ -759,25 +759,20 @@ sub lto_experiment {
 
             for my $called_identifier (sort keys %$called_identifiers) {
                 if ($called_identifier eq $last_identifier) {
-                    return \@res;
+                    return @res;
                 }
                 $called_identifier =~ s/\..*//;
                 if ($called_identifier eq $last_identifier) {
-                    return \@res;
+                    return @res;
                 }
             }
 
             push @res, "lto:impossible := $string";
-            return \@res;
+            return @res;
         }
     };
 
-    $abort = sub {
-        undef $yield;
-        undef $abort;
-    };
-
-    return [[], $yield, $abort];
+    return Generator->new(yield => $yield);
 }
 
 sub baddie {
@@ -881,33 +876,7 @@ sub lto_path {
     my ($path_string, $scaga, $scaga1) = @_;
     my $path = Scaga::Path->new($_[0]);
 
-    my $r = lto_experiment($path, $scaga, $scaga1);
-    my ($retval, $yield0, $abort0) = @$r;
-
-    my $yield;
-    my $abort;
-
-    my $first = 1;
-
-    $yield = sub {
-        my $r = $yield0->();
-
-        unless ($r) {
-            return [["lto:unknown := $path_string"], sub { return; }, sub { return; }];
-        }
-
-        ($retval, $yield0, $abort0) = @$r;
-
-        return [$retval, $yield, $abort];
-    };
-
-    $abort = sub {
-        $abort0->();
-        undef $yield;
-        undef $abort;
-    };
-
-    return [$retval, $yield, $abort];
+    return lto_experiment($path, $scaga, $scaga1);
 }
 
 sub rec1_path {
@@ -996,11 +965,12 @@ sub rec_path {
     };
 
     $yield = sub {
+        my ($self) = @_;
         while (1) {
             if (@out) {
                 my @r = @out;
                 @out = ();
-                return [\@r, $yield, $abort];
+                return @r;
             }
 
             if (@expanded) {
@@ -1057,6 +1027,7 @@ sub rec_path {
             if (!@new) {
                 if ($done) {
                     undef $yield;
+                    $self->eof(1);
                     return;
                 }
 
@@ -1069,19 +1040,19 @@ sub rec_path {
         }
     };
 
-    return [[], $yield, $abort];
+    return Generator->new(yield => $yield, abort => $abort);
 }
 
 my $scaga = scaga_rules(read_scaga(@scaga_files));
 my $keep = generate_keep();
 my @res = ("init := init\n");
 
-my @stack;
+my %generators;
 
 sub sequence_marker {
     my ($more) = @_;
 
-    print "!!!sequence: " . $gsequence++ . ($more ? " more " : " done ") . join(" ", shuffle grep { $stack[$_] } (0 .. $#stack)) . "\n";
+    print "!!!sequence: " . $gsequence++ . ($more ? " more " : " done ") . join(" ", sort { $generators{$a}->{age} <=> $generators{$b}->{age} } (keys %generators)) . "\n";
 }
 
 while (1) {
@@ -1105,78 +1076,22 @@ while (1) {
     } elsif ($command =~ /^expand := (.*)$/) {
         @res = expand_path($1, $scaga, $scaga1);
     } elsif ($command =~ /^check := (.*)?/) {
+        @res = check_path($1, $scaga, $scaga1);
     } elsif ($command eq "--reread-rules") {
         $scaga = scaga_rules(read_scaga(@scaga_files));
         $keep = generate_keep();
     } elsif ($command =~ /^lto := (.*)$/) {
-        my $r = lto_path($1, $scaga, $scaga1);
-        if ($r) {
-            my ($retval, $yield, $abort) = @$r;
-            push @stack, [$gsequence, $yield, $abort];
-
-            push @res, @$retval;
-        }
+        $generators{$gsequence} = lto_path($1, $scaga, $scaga1);
     } elsif ($command =~ /^rec := (.*)$/) {
-        my $r = rec_path($1, $scaga, $scaga1);
-        if ($r) {
-            my ($retval, $yield, $abort) = @$r;
-            push @stack, [$gsequence, $yield, $abort];
-
-            push @res, @$retval;
-        }
-    } elsif ($command eq "--abort") {
-        my $r = pop @stack;
-
-        if ($r) {
-            my ($seq, $yield, $abort) = @$r;
-
-            $abort->();
-        }
+        $generators{$gsequence} = rec_path($1, $scaga, $scaga1);
     } elsif ($command =~ /^--abort (\d*)$/) {
         my $i = $1;
-        my $r = $stack[$i];
-
-        if ($r) {
-            my ($seq, $yield, $abort) = @$r;
-
-            $abort->();
-        }
-
-        $stack[$i] = undef;
+        delete($generators{$i})->abort;
     } elsif ($command =~ /^--next (\d*)$/) {
         my $i = $1;
-        my $r = $stack[$1];
+        push @res, $generators{$i}->fetch;
 
-        if ($r) {
-            my ($seq, $yield, $abort) = @$r;
-
-            my $newr = $yield->();
-            if ($newr) {
-                my ($retval, $new_yield, $new_abort) = @$newr;
-                $stack[$i] = [$gsequence, $new_yield, $new_abort];
-
-                push @res, @$retval;
-            } else {
-                $stack[$i] = undef;
-            }
-        }
-    } elsif ($command eq "--next") {
-        my $i = $#stack;
-        my $r = $stack[$i];
-
-        if ($r) {
-            my ($seq, $yield, $abort) = @$r;
-
-            my $newr = $yield->();
-            if ($newr) {
-                my ($retval, $new_yield, $new_abort) = @$newr;
-                $stack[$i] = [$gsequence, $new_yield, $new_abort];
-
-                push @res, @$retval;
-            } else {
-                $stack[$i] = undef;
-            }
-        }
+        delete $generators{$i} if $generators{$i}->eof;
     } elsif ($command eq "") {
         last;
     } else {
