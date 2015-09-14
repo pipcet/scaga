@@ -5,6 +5,7 @@ use Getopt::Long;
 use File::Slurp qw(read_file write_file);
 use Data::Dumper;
 use List::Util qw(shuffle);
+use IPC::Run qw(start);
 
 my @rules_files = ();
 my @calls_files = ();
@@ -35,9 +36,6 @@ GetOptions("last=i" => \$last,
 my @scaga_files;
 push @scaga_files, @rules_files;
 push @scaga_files, @badrules_files;
-
-my @scaga = read_scaga(@scaga_files);
-my @scaga1 = read_scaga(@calls_files);
 
 sub read_scaga {
 #    warn "reading scaga...";
@@ -70,12 +68,13 @@ sub read_scaga {
     }
 
 #    warn "reading scaga done.";
-    return @ret;
+    return \@ret;
 }
 
-sub hash_scaga {
+sub scaga_rules {
 #    warn "hashing scaga...";
-    my (@rules) = @_;
+    my ($rules) = @_;
+    my @rules = @$rules;
     my $ret = { call => { "" => [] }};
     for my $rule (@rules) {
         my $kind = $rule->{kind};
@@ -113,8 +112,65 @@ sub hash_scaga {
     return $ret;
 }
 
-my $scaga = hash_scaga(@scaga);
-my $scaga1 = hash_scaga(@scaga1);
+sub scaga_homes {
+    my (@scaga) = @_;
+    my %home;
+    for my $scaga (@scaga) {
+        for my $rules (values %{$scaga->{home}}) {
+            for my $rule (@$rules) {
+                my $path = $rule->{in};
+                next unless $path->n == 1;
+                my $identifier = $path->last_identifier;
+                my $home;
+
+                for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
+                    if (exists $component->{home}) {
+                        $home = $component->{home};
+                        $home =~ s/:.*//;
+                    }
+                }
+
+                if (defined $home) {
+                    $home{$identifier} = $home;
+                }
+            }
+        }
+    }
+
+    return \%home;
+}
+
+sub scaga_types {
+    my (@scaga) = @_;
+    my %type;
+    for my $scaga (@scaga) {
+        for my $rules (values %{$scaga->{call}}) {
+            for my $rule (@$rules) {
+                my $path = $rule->{out};
+
+                next unless $path->n == 2;
+                my $identifier = $path->last_identifier;
+
+                my $type;
+
+                for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
+                    if (exists $component->{identifier}) {
+                        $type = $component->{identifier};
+                    }
+                }
+
+                if (defined $type and $type =~ /\(\*\)/) {
+                    $type{$identifier} = $type;
+                }
+            }
+        }
+    }
+
+    return \%type;
+}
+
+my $scaga = scaga_rules(read_scaga(@scaga_files));
+my $scaga1 = scaga_rules(read_scaga(@calls_files));
 
 delete $scaga1->{id_id};
 
@@ -365,7 +421,7 @@ sub lto_print {
 # result: 0
 
 sub rewrite {
-    my ($infile, $outfile) = @_;
+    my ($outfile, $infile) = @_;
 
     my ($ifh, $ofh);
     open $ifh, "<$infile" or return 0;
@@ -388,148 +444,67 @@ sub rewrite {
     return 1;
 }
 
-sub lto_experiment {
-    my ($inpath, $scaga, $scaga1) = @_;
-    my $ltos = lto_read;
+sub lto_rewrite {
+    my ($out, $in, $attrs, $protos) = @_;
 
-    my $string = $inpath->repr;
-
-    if ($ltos->{"lto:impossible := " . $string}) {
-        return 'impossible';
-    } elsif ($ltos->{"lto:noreturn := " . $string}) {
-        return 'noreturn';
-    } elsif ($ltos->{"lto:unknown := " . $string}) {
-        return 'unknown';
-    }
-
-    my @critlines = critical_lines($inpath, $scaga, $scaga1);
-    my @critlines1 = critical_lines($inpath, $scaga, $scaga1, 1);
-
-    my %type;
-
-    for my $rules (values %{$scaga1->{call}}) {
-        for my $rule (@$rules) {
-            my $path = $rule->{out};
-
-            next unless $path->n == 2;
-            my $identifier = $path->last_identifier;
-
-            my $type;
-
-            for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
-                if (exists $component->{identifier}) {
-                    $type = $component->{identifier};
-                }
-            }
-
-            if (defined $type and $type =~ /\(\*\)/) {
-                $type{$identifier} = $type;
-            }
-        }
-    }
-
-    my %home;
-
-    for my $rules (values %{$scaga1->{home}}) {
-        for my $rule (@$rules) {
-            my $path = $rule->{in};
-            next unless $path->n == 1;
-            my $identifier = $path->last_identifier;
-            my $home;
-
-            for my $component (@{$path->{ppaths}[0]->{patterns}[0]->{components}}) {
-                if (exists $component->{home}) {
-                    $home = $component->{home};
-                    $home =~ s/:.*//;
-                }
-            }
-
-            if (defined $home) {
-                $home{$identifier} = $home;
-            }
-        }
-    }
-
-    my @identifiers = $inpath->identifiers;
-    my $first_identifier = $identifiers[0];
-    my $last_identifier = $identifiers[$#identifiers];
-    my %files;
-
-    for my $identifier (@identifiers) {
-        if ($identifier =~ /\(\*\)/) {
-            next;
-        }
-        if (!exists($home{$identifier})) {
-            warn "no home for $identifier";
-            return 'unknown';
-        }
-        $files{$home{$identifier}}{$identifier} = 1;
-    }
-
-    my @files = sort keys %files;
-    my $dir = File::Temp->newdir(CLEANUP => 0);
-    lto_print "# $dir";
-    my @newfiles;
-
-    for my $file (@files) {
-        my $newfile = $file;
-        my $ffile;
-        $newfile =~ s/.*\///;
-        if ($file !~ /^\//) {
-            for my $dir (@source_directories) {
-                if (-e "$dir/$file") {
-                    $ffile = "$dir/$file";
-                    last;
-                }
-            }
-        } else {
-            $ffile = $file;
-        }
-        unless (defined $ffile) {
-            warn "can't find $file in @source_directories";
-            return 'unknown';
-        }
-        rewrite($ffile, $dir . "/" . $newfile) or die "$file / $newfile";
-        my $fh;
-        open $fh, ">>$dir/$newfile" or die "$file / $newfile";
-
-        for my $identifier (sort keys %{$files{$file}}) {
-            my $attr = "always_inline";
-            $attr = "noinline" if $identifier eq $first_identifier
-                or $identifier eq $last_identifier;
-            my $proto = $type{$identifier};
-            $proto =~ s/\(\*\)/$identifier/;
-            print $fh $proto . " __attribute__(($attr));\n";
-        }
-
-        warn "$cc $dir/$newfile -o $dir/$newfile.o";
-        if (system("$cc $dir/$newfile -o $dir/$newfile.o")) {
-            warn "$cc failed";
-            return 'unknown';
-        }
-
-        close $fh;
-        push @newfiles, $newfile;
-    }
-
-    warn "$lto -o $dir/test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles);
-    if (system("$lto -o $dir/test.s " . join(" ", map { $dir . "/" . $_ . ".o" } @newfiles))) {
-        warn "$lto failed";
-        # return 1;
-    }
-
+    rewrite($out, $in) or die "$in / $out";
     my $fh;
+    open $fh, ">>$out" or die "$in / $out";
 
-    unless (open $fh, "<$dir/test.s") {
-        warn "no test.s";
-        return 'unknown';
+    for my $identifier (sort keys %{$attrs}) {
+        my $attr = $attrs->{$identifier};
+        my $proto = $protos->{$identifier};
+        $proto =~ s/\(\*\)/$identifier/;
+        print $fh $proto . " __attribute__(($attr));\n";
     }
 
+    close $fh;
+
+    return $out;
+}
+
+sub lto_cc1 {
+    my ($out, $in) = @_;
+    my ($stdin, $stdout, $stderr);
+    warn "$cc $in -o $out";
+    return start(["/bin/sh",  "-c", "$cc $in -o $out"], \$stdin, \$stdout, \$stderr);
+}
+
+sub lto_lto1 {
+    my ($out, @in) = @_;
+    my ($stdin, $stdout, $stderr);
+    warn "$lto -o $out " . join(" ", @in);
+    return start(["/bin/sh", "-c", "$lto -o $out " . join(" ", @in)], \$stdin, \$stdout, \$stderr);
+}
+
+sub lto_find_file {
+    my ($file, @directories) = @_;
+
+    if ($file =~ /^\//) {
+        return $file;
+    }
+
+    for my $directory (@directories) {
+        return "$directory/$file" if -e "$directory/$file";
+    }
+
+    return;
+}
+
+sub lto_read_sfile {
+    my ($sfile, $first_identifier) = @_;
     my %called_identifiers;
     my %called_and_returning_identifiers;
     my $function_returns = 0;
     my $found = 0;
     my @files;
+    my $fh;
+
+    unless (open $fh, "<$sfile") {
+        warn "no test.s";
+        return;
+    }
+
     while (<$fh>) {
         if (/\.file[ \t]+(\d*?)[ \t]+\"(.*?)\"$/) {
             $files[$1] = $2;
@@ -596,7 +571,7 @@ sub lto_experiment {
                         next id;
                     }
                 }
-          }
+            }
 
             @open_identifiers = ();
             $found = 1;
@@ -628,55 +603,29 @@ sub lto_experiment {
         }
     }
 
-    if (!$function_returns) {
-        warn "function $first_identifier doesn't return!";
-    }
-
-    if (!$found) {
-        warn "couldn't find $first_identifier";
-        return 'unknown';
-    }
-
     close $fh;
 
-    if ($inpath->n == 1) {
-        return $function_returns ? 'unknown' : 'noreturn';
-    }
+    return (!$function_returns, \%called_and_returning_identifiers, \%called_identifiers);
+}
 
-    my $noreturn = 0;
-    if (!$called_and_returning_identifiers{$last_identifier}) {
-        $noreturn = 1;
-        for my $i (1 .. $#identifiers - 1) {
-            if ($called_and_returning_identifiers{$identifiers[$i]}) {
-                $noreturn = 0;
-            }
-        }
-
-        # lto_print "lto:noreturn := " . $inpath->repr
-        #     if $noreturn;
-    }
-
+sub lto_critical_identifiers {
+    my ($called_identifiers, $called_and_returning_identifiers, $critlines, $critlines1) = @_;
     my @critical_called_identifiers;
-    for my $called_identifier (sort keys %called_identifiers) {
-        for my $line (@{$called_identifiers{$called_identifier}}) {
-            my ($f0, $l0, $c0) = @{$line->[0]};
-            warn "function $first_identifier calls $called_identifier after $f0:$l0:$c0\n";
-            if ($line->[1]) {
-                my ($f1, $l1, $c1) = @{$line->[1]};
-                warn "function $first_identifier calls $called_identifier between $f0:$l0:$c0 and $f1:$l1:$c1\n";
-            }
-            for my $cline (@critlines) {
+
+    for my $called_identifier (sort keys %$called_identifiers) {
+        for my $line (@{$called_identifiers->{$called_identifier}}) {
+            for my $cline (@$critlines) {
                 if (inrange($line, $cline)) {
                     warn "in range! oh no!";
 
-                    if ($called_and_returning_identifiers{$called_identifier}) {
-                        $noreturn = 0;
+                    if ($called_identifier =~ /^\*/) {
+                        # indirect call
+                        return '(*)';
                     }
-
-                    return ($noreturn ? 'noreturn' : 'unknown') if $called_identifier =~ /^\*/; # indirect call
                 }
             }
-            for my $cline (@critlines1) {
+
+            for my $cline (@$critlines1) {
                 if (inrange($line, $cline)) {
                     push @critical_called_identifiers, $called_identifier;
                 }
@@ -684,22 +633,151 @@ sub lto_experiment {
         }
     }
 
-    if ($last_identifier =~ /\(\*\)/) {
-        for my $cci (@critical_called_identifiers) {
-            my $newpath = $inpath->slice(0, $inpath->n - 1)->concat(Scaga::Path->new($cci));
-            lto_print "lto:devirt := " . $inpath->repr . " => " . $newpath->repr;
-            print "lto:devirt := " . $inpath->repr . " => " . $newpath->repr . "\n";
-            print "!!!sequence: " . $gsequence++ . " more\n";
+    return @critical_called_identifiers;
+}
+
+sub lto_cfiles {
+    my ($home, @identifiers) = @_;
+    my $cfiles = {};
+
+    for my $identifier (@identifiers) {
+        if ($identifier =~ /\(\*\)/) {
+            next;
         }
+        if (!exists($home->{$identifier})) {
+            return;
+        }
+        $cfiles->{$home->{$identifier}}{$identifier} = 1;
     }
 
-    for my $called_identifier (sort keys %called_identifiers) {
-        return ($noreturn ? 'noreturn' : 'unknown') if grep { $_ eq $called_identifier } @identifiers;
-        $called_identifier =~ s/\..*//;
-        return ($noreturn ? 'noreturn' : 'unknown') if grep { $_ eq $called_identifier } @identifiers;
+    return $cfiles;
+}
+
+sub lto_experiment {
+    my ($inpath, $scaga, $scaga1) = @_;
+    my @res;
+
+    my $string = $inpath->repr;
+
+    my $type = scaga_types($scaga1);
+    my $home = scaga_homes($scaga1);
+
+    my @critlines = critical_lines($inpath, $scaga, $scaga1);
+    my @critlines1 = critical_lines($inpath, $scaga, $scaga1, 1);
+
+    my @identifiers = $inpath->identifiers;
+    my $first_identifier = $identifiers[0];
+    my $last_identifier = $identifiers[$#identifiers];
+
+    my $cfiles = lto_cfiles($home, @identifiers);
+
+    my @cfiles = sort keys %$cfiles;
+
+    my $dir = File::Temp->newdir(CLEANUP => 0);
+    my %oh;
+    my @ofiles;
+    my $sh;
+    my $sfile;
+    my $yield;
+    my $abort;
+    my $state = 0;
+
+    for my $cfile (@cfiles) {
+        my $ffile = lto_find_file($cfile, @source_directories);
+
+        if (!defined $ffile) {
+            warn "can't find $cfile in @source_directories";
+            return \@res;
+        }
+
+        for my $identifier (sort keys %{$cfiles->{$cfile}}) {
+            my $attr = "always_inline";
+            $attr = "noinline" if $identifier eq $first_identifier
+                or $identifier eq $last_identifier;
+            $cfiles->{$cfile}{$identifier} = $attr;
+        }
+
+        my $cfile_rewritten = lto_rewrite("$dir/$cfile", $ffile, $cfiles->{$cfile}, $type);
+
+        if (!defined($cfile_rewritten)) {
+            return \@res;
+        }
+
+        $oh{"$dir/$cfile.o"} = lto_cc1("$dir/$cfile.o", $cfile_rewritten);
+        $oh{"$dir/$cfile.o"}->start;
     }
 
-    return 'impossible';
+    $yield = sub {
+        if ($state == 0) {
+            for my $ofile (keys %oh) {
+                $oh{$ofile}->finish or return @res;
+                push @ofiles, $ofile;
+            }
+            $sh = lto_lto1("$dir/test.s", @ofiles);
+
+            return [[], $yield, $abort];
+        } elsif ($state == 1) {
+            $sh->finish or return @res;
+            $sfile = "$dir/test.s";
+
+            my ($noreturn, $called_and_returning_identifiers, $called_identifiers) =
+                lto_read_sfile($sfile);
+
+            if (!defined $noreturn) {
+                return \@res;
+            }
+
+            if ($called_and_returning_identifiers->{$last_identifier}) {
+                $noreturn = 1;
+                for my $i (1 .. $#identifiers - 1) {
+                    if ($called_and_returning_identifiers->{$identifiers[$i]}) {
+                        $noreturn = 0;
+                    }
+                }
+            }
+
+            if ($noreturn) {
+                push @res, "lto:noreturn := $string\n";
+            }
+
+            if ($inpath->n == 1) {
+                return \@res;
+            }
+
+            my @critical_called_identifiers = lto_critical_identifiers($called_identifiers, \@critlines, \@critlines1);
+
+            if ($critical_called_identifiers[0] eq '(*)') {
+                return \@res;
+            }
+
+            if ($last_identifier =~ /\(\*\)/) {
+                for my $cci (@critical_called_identifiers) {
+                    my $newpath = $inpath->slice(0, $inpath->n - 1)->concat(Scaga::Path->new($cci));
+                    push @res, "lto:devirt := " . $inpath->repr . " => " . $newpath->repr;
+                }
+            }
+
+            for my $called_identifier (sort keys %$called_identifiers) {
+                if ($called_identifier eq $last_identifier) {
+                    return \@res;
+                }
+                $called_identifier =~ s/\..*//;
+                if ($called_identifier eq $last_identifier) {
+                    return \@res;
+                }
+            }
+
+            push @res, "lto:impossible := $string";
+            return \@res;
+        }
+    };
+
+    $abort = sub {
+        undef $yield;
+        undef $abort;
+    };
+
+    return [[], $yield, $abort];
 }
 
 sub baddie {
@@ -801,14 +879,35 @@ sub check_path {
 
 sub lto_path {
     my ($path_string, $scaga, $scaga1) = @_;
-    my @res;
     my $path = Scaga::Path->new($_[0]);
 
-    my $ret = lto_experiment($path, $scaga, $scaga1);
+    my $r = lto_experiment($path, $scaga, $scaga1);
+    my ($retval, $yield0, $abort0) = @$r;
 
-    push @res, "lto:$ret := " . $path->repr;
+    my $yield;
+    my $abort;
 
-    return @res;
+    my $first = 1;
+
+    $yield = sub {
+        my $r = $yield0->();
+
+        unless ($r) {
+            return [["lto:unknown := $path_string"], sub { return; }, sub { return; }];
+        }
+
+        ($retval, $yield0, $abort0) = @$r;
+
+        return [$retval, $yield, $abort];
+    };
+
+    $abort = sub {
+        $abort0->();
+        undef $yield;
+        undef $abort;
+    };
+
+    return [$retval, $yield, $abort];
 }
 
 sub rec1_path {
@@ -899,7 +998,9 @@ sub rec_path {
     $yield = sub {
         while (1) {
             if (@out) {
-                return [pop(@out), $yield, $abort];
+                my @r = @out;
+                @out = ();
+                return [\@r, $yield, $abort];
             }
 
             if (@expanded) {
@@ -961,32 +1062,39 @@ sub rec_path {
 
                 $done = 1;
                 @new = @newnew;
+                @newnew = ();
 
                 next;
             }
         }
     };
 
-    return ["nop := nop", $yield, $abort];
+    return [[], $yield, $abort];
 }
 
-my $scaga = hash_scaga(read_scaga(@scaga_files));
+my $scaga = scaga_rules(read_scaga(@scaga_files));
 my $keep = generate_keep();
 my @res = ("init := init\n");
 
 my @stack;
 
+sub sequence_marker {
+    my ($more) = @_;
+
+    print "!!!sequence: " . $gsequence++ . ($more ? " more " : " done ") . join(" ", shuffle grep { $stack[$_] } (0 .. $#stack)) . "\n";
+}
+
 while (1) {
     if (@res) {
         for my $i (0 .. $#res) {
             print $res[$i] . "\n";
-            print "!!!sequence: " . $gsequence++ . " more " . scalar(@stack) . "\n"
+            sequence_marker(1)
                 unless $#res == $i;
         }
     } else {
         print "nop := nop\n";
     }
-    print "!!!sequence: " . $gsequence++ . " done " . scalar(@stack) . "\n";
+    sequence_marker(0);
     @res = ();
     my $command = <STDIN>;
     chomp $command;
@@ -998,17 +1106,23 @@ while (1) {
         @res = expand_path($1, $scaga, $scaga1);
     } elsif ($command =~ /^check := (.*)?/) {
     } elsif ($command eq "--reread-rules") {
-        $scaga = hash_scaga(read_scaga(@scaga_files));
+        $scaga = scaga_rules(read_scaga(@scaga_files));
         $keep = generate_keep();
     } elsif ($command =~ /^lto := (.*)$/) {
-        push @res, lto_path($1, $scaga, $scaga1);
+        my $r = lto_path($1, $scaga, $scaga1);
+        if ($r) {
+            my ($retval, $yield, $abort) = @$r;
+            push @stack, [$gsequence, $yield, $abort];
+
+            push @res, @$retval;
+        }
     } elsif ($command =~ /^rec := (.*)$/) {
         my $r = rec_path($1, $scaga, $scaga1);
         if ($r) {
             my ($retval, $yield, $abort) = @$r;
             push @stack, [$gsequence, $yield, $abort];
 
-            push @res, $retval;
+            push @res, @$retval;
         }
     } elsif ($command eq "--abort") {
         my $r = pop @stack;
@@ -1018,8 +1132,20 @@ while (1) {
 
             $abort->();
         }
-    } elsif ($command eq "--next") {
-        my $r = pop @stack;
+    } elsif ($command =~ /^--abort (\d*)$/) {
+        my $i = $1;
+        my $r = $stack[$i];
+
+        if ($r) {
+            my ($seq, $yield, $abort) = @$r;
+
+            $abort->();
+        }
+
+        $stack[$i] = undef;
+    } elsif ($command =~ /^--next (\d*)$/) {
+        my $i = $1;
+        my $r = $stack[$1];
 
         if ($r) {
             my ($seq, $yield, $abort) = @$r;
@@ -1027,9 +1153,28 @@ while (1) {
             my $newr = $yield->();
             if ($newr) {
                 my ($retval, $new_yield, $new_abort) = @$newr;
-                push @stack, [$gsequence, $new_yield, $new_abort];
+                $stack[$i] = [$gsequence, $new_yield, $new_abort];
 
-                push @res, $retval;
+                push @res, @$retval;
+            } else {
+                $stack[$i] = undef;
+            }
+        }
+    } elsif ($command eq "--next") {
+        my $i = $#stack;
+        my $r = $stack[$i];
+
+        if ($r) {
+            my ($seq, $yield, $abort) = @$r;
+
+            my $newr = $yield->();
+            if ($newr) {
+                my ($retval, $new_yield, $new_abort) = @$newr;
+                $stack[$i] = [$gsequence, $new_yield, $new_abort];
+
+                push @res, @$retval;
+            } else {
+                $stack[$i] = undef;
             }
         }
     } elsif ($command eq "") {

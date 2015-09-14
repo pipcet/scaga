@@ -1,5 +1,6 @@
 (defvar scaga-timer nil)
 (defvar scaga-batch-state nil)
+(defvar scaga-marker nil)
 
 (defun scaga-process-summary ()
   (let (ret)
@@ -65,6 +66,7 @@
     (setq scaga-calls (list (concat scaga-rules-dir "/calls.scaga")))
     (with-current-buffer pbuffer
       (set (make-local-variable 'scaga-buffer) buffer)
+      (set (make-local-variable 'scaga-marker) (copy-marker 1 nil))
       (set (make-local-variable 'scaga-sequence) 0))
     (setq scaga-rules-buffer (find-file-noselect (car scaga-rules)))
     (setq scaga-paths-buffer (find-file-noselect (car scaga-paths)))
@@ -546,7 +548,8 @@
           t)
          ((equal kind "expand")
           (scaga-check-one path)
-          t)))
+          t)
+         (t t)))
 
 (defun scaga-loopback ()
   (goto-char (cdr (assq 'incoming scaga-markers)))
@@ -653,16 +656,16 @@
               (while (scaga-loopback))))
           (process-buffer scaga-process))
       (save-excursion
-        (goto-char 1)
+        (goto-char scaga-marker)
         (while (looking-at-p ".*\n[^!]")
           (re-search-forward "\n")
-          (delete-region 1 (point)))
+          (set-marker scaga-marker (point)))
         (while (looking-at-p (concat ".*"
                                      "\n"
                                      "!!!sequence: "
                                      (regexp-quote (number-to-string scaga-sequence))
-                                     " \\(more\\|done\\)"
-                                     " \\([0-9]+\\)"
+                                     " \\(more\\|done\\) ?"
+                                     "\\(\\( [0-9]+\\)*\\)"
                                      "\n"))
           (save-match-data
             (re-search-forward (concat "^"
@@ -670,14 +673,14 @@
                                        "\n"
                                        "!!!sequence: "
                                        (regexp-quote (number-to-string scaga-sequence))
-                                       " \\(more\\|done\\)"
-                                       " \\([0-9]+\\)"
+                                       " \\(more\\|done\\) ?"
+                                       "\\(\\( [0-9]+\\)*\\)"
                                        "\n")
                                nil t)
             (incf scaga-sequence)
             (let ((line (match-string 1))
                   (more (equal (match-string 2) "more"))
-                  (depth (string-to-number (match-string 3))))
+                  (open (mapcar #'string-to-number (cdr (split-string (match-string 3) " ")))))
               (with-current-buffer buffer
                 (save-excursion
                   (let ((inhibit-read-only t))
@@ -686,8 +689,9 @@
                 (with-current-buffer buffer
                   (when (process-live-p scaga-process)
                     (if (and (null scaga-queue)
-                             (> depth 0))
-                        (let ((q (cons "--next" (format "continuing at depth %d" depth))))
+                             open)
+                        (let ((q (cons (format "--next %d" (car open))
+                                       (format "continuing request %d" (car open)))))
                           (push q scaga-queue)))
                     (let ((q nil))
                       (setq q (car scaga-queue))
@@ -707,8 +711,8 @@
               (save-excursion
                 (goto-char (point-max))
                 (let ((inhibit-read-only t))
-                  (insert "\n")))))
-          (delete-region 1 (point))))))))
+                  (insert "\n"))))))
+          (set-marker scaga-marker (point)))))))
 
 (define-derived-mode scaga-mode special-mode "SCAGA"
   "SCAGA mode, see https://github.com/pipcet/scaga"
@@ -797,7 +801,7 @@
       (set (make-local-variable 'scaga-source) "/home/pip/git/emacs/src")
       (set (make-local-variable 'scaga-rules-dir) "/home/pip/git/scaga")
       (set (make-local-variable 'scaga-cc) "gcc -Demacs -I/home/pip/git/emacs/src -I/home/pip/git/emacs/lib $(pkg-config --cflags gtk+-3.0) -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -fno-optimize-sibling-calls -ffunction-sections -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -ggdb3 -O3 -c")
-      (set (make-local-variable 'scaga-lto) "/usr/local/libexec/gcc/x86_64-pc-linux-gnu/6.0.0/lto1 -S -ggdb3 -O3 -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -ffunction-sections -flto -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans --param max-inline-recursive-depth=1 --param max-inline-recursive-depth-auto=1")
+      (set (make-local-variable 'scaga-lto) "/usr/local/libexec/gcc/x86_64-pc-linux-gnu/6.0.0/lto1 -S -ggdb3 -O3 -fno-inline-functions -fno-inline-functions-called-once -fno-inline-small-functions -ffunction-sections -flto -fno-function-cse -flto -fdevirtualize-speculatively -fdevirtualize-at-ltrans -flto -mtune=generic -march=x86-64 -mtune=generic -march=x86-64 -O3 -version -fmath-errno -fsigned-zeros -ftrapping-math -fno-trapv -fno-strict-overflow -fno-openmp -fno-openacc -fno-function-cse -fdevirtualize-speculatively -fdevirtualize-at-ltrans --param max-inline-recursive-depth=2 --param max-inline-recursive-depth-auto=2")
       (set (make-local-variable 'scaga-rules-dir) "/home/pip/git/scaga")
       (set (make-local-variable 'scaga-ignore-noreturn) t)
       (set (make-local-variable 'scaga-batch-mode) nil)
