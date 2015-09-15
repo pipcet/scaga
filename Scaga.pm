@@ -98,12 +98,12 @@ use Data::Dumper;
 sub force1 {
     my ($self) = @_;
 
-    if (ref $self->{promise}) {
-        $self->{promise} = $self->{promise}->();
+    if ($self->{promise}->forced) {
+        return $self->{promise}->value;
+    } else {
+        $self->{promise} = $self->{promise}->force;
 
         return $self;
-    } else {
-        return $self->{class}->new($self->{promise});
     }
 }
 

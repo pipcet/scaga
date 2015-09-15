@@ -10,6 +10,7 @@ use File::Slurp qw/slurp/;
 use Getopt::Long;
 use strict;
 use Scaga;
+use Promise;
 
 our $DEBUG = 0;
 my @cmd = ("/usr/bin/gdb");
@@ -62,8 +63,35 @@ sub runcmd {
     chomp $cmd;
     $cmd .= "\n" if $cmd ne "";
 
-    my $retval;
-    $retval = sub { while (!defined($ret)) { $self->pump(); }; undef $retval; return $ret; };
+    my $force1;
+    my $check1;
+    my $finish;
+
+    $force1 = sub {
+        while (!defined($ret)) {
+            $self->pump();
+        }
+
+        return Promise::Forced->new($ret);
+    };
+
+    $check1 = sub {
+        if (!defined($ret)) {
+            $self->pump_nb();
+        }
+
+        return defined($ret);
+    };
+
+    $finish = sub {
+        undef $force1;
+        undef $check1;
+        undef $finish;
+    };
+
+    my $retval = Promise->new(force1 => $force1,
+                              check1 => $check1,
+                              finish => $finish);
 
     unless($nocache) {
         $self->{cache}->{$cmd} = $retval;
@@ -181,12 +209,17 @@ sub gdbb9 {
     return $l[$#l];
 }
 
+my $last_time;
+
 sub pump_nb {
     for my $gdbb (@gdbb) {
         $gdbb->pump_nb;
     }
 
-    print STDERR join(" ", map { $_->handlers } @gdbb) . "\n";
+    if (time() != $last_time) {
+        warn join(" ", map { $_->handlers } @gdbb) . "\n";
+        $last_time = time();
+    }
 }
 
 sub runcmd($) {
@@ -212,70 +245,145 @@ my %types;
 # this parses the output of gcc -fdump-tree-gimple-vops-verbose-raw-lineno
 # (.gimple)
 
-sub fstrip {
-    my ($f, @patterns) = @_;
-
-    return sub {
-        if (ref $f) {
-            return fstrip($f->(), @patterns);
-        }
-
-        my $ret = $f;
-
-        for my $pattern (@patterns) {
-            while ($ret =~ s/$pattern//msg) { }
-        }
-
-        die unless defined $ret;
-
-        return $ret;
-    };
-}
-
-sub fstrip2 {
-    my ($f, @patterns) = @_;
-
-    return sub {
-        if (ref $f) {
-            return fstrip2($f->(), @patterns);
-        }
-
-        my $ret = $f;
-
-        for my $pattern (@patterns) {
-            unless ($ret =~ s/$pattern//msg) {
-                return undef;
-            }
-        }
-
-        die unless defined $ret;
-
-        return $ret;
-    };
-}
-
 sub p {
     my ($rip, $expr) = @_;
 
     die unless defined $rip;
 
-    return sub {
-        if (ref $rip) {
-            $rip = $rip->();
+    $rip = Promise->promise($rip);
+    $expr = Promise->promise($expr);
 
-            return p($rip, $expr);
+    my $force1;
+    my $check1;
+    my $finish;
+
+    $force1 = sub {
+        $rip = $rip->force1;
+        return unless $rip->forced;
+        $expr = $expr->force1;
+        return unless $expr->forced;
+
+        my $p = runcmd("if 1\np \$rip = " . $rip->value . "\np " . $expr->value . "\nend");
+
+        return $p->strip('.*\$[0-9]* = ');
+    };
+
+    $check1 = sub {
+        while (!$rip->forced) {
+            if (!$rip->check1) {
+                return 0;
+            }
+            $rip = $rip->force1;
         }
 
-        my $fret = runcmd ("if 1\np \$rip = $rip\np $expr\nend");
+        while (!$expr->forced) {
+            if (!$expr->check1) {
+                return 0;
+            }
+            $expr = $expr->force1;
+        }
 
-        return fstrip2($fret, '.*\$[0-9]* = ');
+        return 1;
     };
+
+    $finish = sub {
+        undef $force1;
+        undef $check1;
+        undef $finish;
+    };
+
+    return Promise->new(force1 => $force1,
+                        check1 => $check1,
+                        finish => $finish);
 }
 
 sub data_value {
     my ($rip, $expr) = @_;
 
     return p($rip, $expr);
+}
+
+sub p2 {
+    my ($rip, $expr) = @_;
+
+    die unless defined $rip;
+
+    $rip = Promise->promise($rip);
+    $expr = Promise->promise($expr);
+
+    my $f = sub {
+        my ($rip, $expr) = @_;
+        my $p = runcmd("if 1\np \$rip = $rip\np $expr\nend");
+
+        return $p;
+    };
+
+    return Promise::Apply->new($f, $rip, $expr)->strip('.*\$[0-9]* = ');
+}
+
+sub function_type {
+    my ($rip, $expr) = @_;
+
+    die unless defined $rip;
+
+    $rip = Promise->promise($rip);
+    $expr = Promise->promise($expr);
+
+    my $f = sub {
+        my ($rip, $expr) = @_;
+        my $p = runcmd("if 1\np \$rip = $rip\nwhatis ($expr)0\nend");
+
+        return $p;
+    };
+
+    my $f2 = sub {
+        my ($rip, $ret1, $expr) = @_;
+
+        if ($ret1 =~ /type = /ms) {
+            return runcmd("if 1\np \$rip=${rip}\nwhatis $expr\nend")->strip('.*type = ');
+        } else {
+            return runcmd("if 1\np \$rip=${rip}\nwhatis \&($expr)\nend")->strip('.*type = ');
+        }
+    };
+
+    return Promise::Apply->new($f2, $rip, Promise::Apply->new($f, $rip, $expr), $expr);
+}
+
+sub data_type {
+    my ($rip, $function) = @_;
+
+    die unless defined $rip;
+
+    $rip = Promise->promise($rip);
+
+    my $f = sub {
+        my ($expr, $rip) = @_;
+
+        return Promise->promise(undef) unless defined($expr);
+
+        return runcmd("if 1\np \$rip=${rip}\nwhatis ${expr}\nend")->strip('.*type = ');
+    };
+
+    return Promise::FixPoint->new($f, $function, $rip);
+}
+
+sub flc_to_rip {
+    my ($flc) = @_;
+    my ($file, $line, $col) = split ":", $flc->{flc};
+
+    my $f = sub {
+        my ($info) = @_;
+
+        if ($info =~ s/Line (.*?) of \"(.*?)\"( |\t|\n)*(is|starts) at address (.*?) <.*$/$5/msg) {
+            die unless $1 eq $line;
+            die unless $2 eq $file;
+            return $info;
+        }
+
+        return "main";
+    };
+
+    return Promise::Apply->new($f, runcmd("info line $file:$line"));
 }
 
 my $pwd;
@@ -297,6 +405,7 @@ if ($do_symbols) {
     open $fh, "nm /usr/local/bin/emacs| cut -c 20- |" or die;
     my @symbols = <$fh>;
     my %symbols;
+    @symbols = sort @symbols;
     my %symbol_components;
     map { chomp } @symbols;
     close $fh;
@@ -305,40 +414,91 @@ if ($do_symbols) {
         $symbols{$symbol} = p("main", $symbol);
     }
 
-    my $done = 0;
+    while (!Promise->check_all) {
+        sleep(1);
+    }
 
-    while(!$done) {
-        $done = 1;
-        for my $symbol (@symbols) {
-            if (!exists $symbols{$symbol}) {
-                next;
-            }
-            if (ref $symbols{$symbol}) {
-                $symbols{$symbol} = $symbols{$symbol}->();
-                $done = 0;
-                next;
-            }
-
-            my $output = $symbols{$symbol};
-            my $function;
-            my $component;
-
-            while ($output =~ s/([a-zA-Z0-9_][a-zA-Z0-9_]*) = //ms) {
-                push @symbols, "$symbol\.$1";
-                $symbols{"$symbol\.$1"} = p("main", "$symbol\.$1");
-                push @{$symbol_components{$symbol}}, $1;
-                push @{$symbol_components{$symbol.".".$1}}, $1;
-                $done = 0;
-            }
-            if ($output =~ s/0x[0-9a-f]+ \<(.*?)\>$//ms) {
-                my ($function) = ($1);
-                for my $component (@{$symbol_components{$symbol}}) {
-                    e('type', [[Scaga::Component::Component->new($component)], [Scaga::Component::Identifier->new($function)]]);
-                }
-            }
-
-            delete $symbols{$symbol};
+    while (my $symbol = shift @symbols) {
+        if (!$symbols{$symbol}->check1) {
+            Promise->check_all;
+            push @symbols, $symbol;
+            next;
+        } elsif (!$symbols{$symbol}->forced) {
+            $symbols{$symbol} = $symbols{$symbol}->force1;
+            Promise->check_all;
+            push @symbols, $symbol;
+            next;
         }
+
+        my $output = $symbols{$symbol}->value;
+        my $function;
+        my $component;
+
+        $symbol_components{$symbol} //= [];
+        while ($output =~ s/([a-zA-Z0-9_][a-zA-Z0-9_]*) = //ms) {
+            my $component = $1;
+            my $o = [$symbol,
+                     $component,
+                     data_type("main", Promise->promise($symbol)),
+                     data_type("main", Promise->promise("$symbol.$component"))];
+            unless ($symbols{"$symbol.$component"}) {
+                push @symbols, "$symbol.$component";
+                $symbols{"$symbol.$component"} = p("main", "$symbol.$component");
+            }
+            push @{$symbol_components{$symbol}}, $o;
+            push @{$symbol_components{$symbol.".".$component}}, $o;
+        }
+    }
+
+    while (!Promise->check_all) {
+        sleep(1);
+    }
+
+    @symbols = sort keys %symbol_components;
+    my @subs;
+
+    while (my $symbol = shift @symbols) {
+        if (!exists $symbol_components{$symbol}) {
+            next;
+        }
+
+        my $output = $symbols{$symbol}->value;
+        my $function;
+        my $component;
+
+        if ($output =~ s/0x[0-9a-f]+ \<(.*?)\>$//ms) {
+            my ($function) = ($1);
+            for my $o (@{$symbol_components{$symbol}}) {
+                my $symbol = $o->[0];
+                my $component = $o->[1];
+                my $symbol_type = $o->[2];
+                my $component_type = $o->[3];
+                my $function_type = function_type($function);
+                my $function_value = data_value($function);
+
+                push @subs, sub {
+                    $symbol_type = $symbol_type->force->value;
+                    $component_type = $component_type->force->value;
+                    $function_type = $function_type->force->value;
+                    $function_value = $function_value->force->value;
+
+                    if (1 or ($component_type eq $function_type)) {
+                        e('type', [[Scaga::Component::Component->new($component),
+                                    Scaga::Component::Intype->new($symbol_type)],
+                                   [Scaga::Component::Identifier->new($function),
+                                    Scaga::Component::Value->new($function_value)]]);
+                    }
+                };
+            }
+        }
+    }
+
+    while (!Promise->check_all) {
+        sleep(1);
+    }
+
+    for my $sub (@subs) {
+        $sub->();
     }
 }
 
@@ -371,17 +531,24 @@ while (<>) {
         if ($expr =~ /->/) {
             $expr =~ /^(.*?)->(.*)$/;
             my $baseexpr = $1;
-            $intype = $types{$baseexpr}{base} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            if ($types{$baseexpr}{base}) {
+                $intype = Promise::Forced->new($types{$baseexpr}{base}->repr);
+            } else {
+                $intype = data_type($rip, $baseexpr);
+            }
             ($inexpr, $comp) = ('*('.$baseexpr.')', $2);
         } else {
             $expr =~ /^(.*)\.([^.]*)$/;
             my $baseexpr = $1;
-            $intype = $types{$baseexpr}{base} ? $types{$baseexpr}{base}->repr : data_type($rip, $baseexpr);
+            if ($types{$baseexpr}{base}) {
+                $intype = Promise::Forced->new($types{$baseexpr}{base}->repr);
+            } else {
+                $intype = data_type($rip, $baseexpr);
+            }
             ($inexpr, $comp) = ($baseexpr, $2);
         }
 
         if (defined ($comp)) {
-            warn "inexpr $inexpr intype $intype";
             $types{$id}{component} = Scaga::Component::Component->new($comp);
             $types{$id}{inexpr} = Scaga::Component::Intype->lazy($intype);
         }
@@ -431,109 +598,9 @@ while (<>) {
     }
 }
 
-sub flc_to_rip {
-    my ($flc) = @_;
-    my ($file, $line, $col) = split ":", $flc->{flc};
-
-    my $fret2 = runcmd("info line $file:$line");
-
-    return sub {
-        my $fret = $fret2;
-        while (ref $fret) {
-            $fret = $fret->();
-        }
-        if ($fret =~ s/Line (.*?) of \"(.*?)\"( |\t|\n)*(is|starts) at address (.*?) <.*$/$5/msg) {
-            die unless $1 eq $line;
-            die unless $2 eq $file;
-            return $fret;
-        }
-
-        return "main";
-
-        die "no rip for $file:$line: $fret";
-        return undef;
-    };
+while (!Promise->check_all) {
+    sleep(1);
 }
-
-sub function_type {
-    my ($rip, $function) = @_;
-
-    if (ref $rip) {
-        $rip = $rip->();
-
-        return function_type($rip, $function);
-    }
-
-    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis (${function})0\nend";
-
-    return sub {
-        my $ret1 = $fret1->();
-
-        while (ref $ret1) {
-            $ret1 = $ret1->();
-        }
-
-        if ($ret1 =~ /type = /ms) {
-            return fstrip2(runcmd("if 1\np \$rip=${rip}\nwhatis $function\nend"), '.*\$[0-9]* = ');
-        } else {
-            return fstrip(runcmd("if 1\np \$rip=${rip}\nwhatis \&($function)\nend"), '.*type = ', '.*\$[0-9]*.*');
-        }
-    };
-}
-
-sub data_type {
-    my ($rip, $function) = @_;
-
-    if (ref $rip) {
-        $rip = $rip->();
-
-        return data_type($rip, $function);
-    }
-
-    my $fret1 = runcmd "if 1\np \$rip=${rip}\nwhatis ${function}\nend";
-    my $fret2 = fstrip2($fret1, '.*type = ');
-
-    my $ret;
-    $ret = sub {
-        if (ref $fret2) {
-            $fret2 = $fret2->();
-            return $ret;
-        }
-
-        $ret = undef;
-
-        if ($function eq $fret2) {
-            return $function;
-        } else {
-            return data_type($rip, $fret2);
-        }
-    };
-}
-
-sub grab_line {
-    my ($file, $line, $line2) = @_;
-    $line2 = $line unless defined $line2;
-
-    my $fret = runcmd "l ${pwd}/${file}:${line},${line2}";
-    return sub {
-        my $ret = $fret->();
-
-        $ret =~ s/^[0-9]*[ \t]*//msg;
-
-        if ($ret =~ /^[({]/) {
-            my $fret2 = grab_line($file, $line-1, $line-1);
-            return sub {
-                my $ret2 = $fret2->();
-
-                return $ret . $ret2;
-            }
-        }
-
-        return $ret;
-    };
-}
-
-use Data::Dumper;
 
 my @paths;
 for my $e (@e) {
